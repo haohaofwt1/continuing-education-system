@@ -15,17 +15,15 @@ export async function POST(request: Request) {
     const result = body.mode === "filter" ? await naturalLanguageFilter(query) : await answerAssistantQuestion(query, body.context);
     const status = body.confirmAction ? "ACCEPTED" : "SUGGESTED";
 
-    await prisma.aiActionLog.create({
-      data: {
-        tenantId: actor.tenantId ?? undefined,
-        actorId: actor.id,
-        action: body.mode === "filter" ? "ai.report_filter_draft" : "ai.chat",
-        status,
-        prompt: query,
-        toolName: body.mode === "filter" ? "naturalLanguageFilter" : "answerAssistantQuestion",
-        input: { mode: body.mode ?? "chat" },
-        output: JSON.parse(JSON.stringify(result))
-      }
+    await writeAiActionLog({
+      tenantId: actor.tenantId ?? undefined,
+      actorId: actor.id,
+      action: body.mode === "filter" ? "ai.report_filter_draft" : "ai.chat",
+      status,
+      prompt: query,
+      toolName: body.mode === "filter" ? "naturalLanguageFilter" : "answerAssistantQuestion",
+      input: { mode: body.mode ?? "chat" },
+      output: JSON.parse(JSON.stringify(result))
     });
     await writeAuditLog({ actor, action: "ai.suggest", entityType: "AiActionLog", after: { query, mode: body.mode ?? "chat", status }, request });
 
@@ -33,5 +31,13 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof Response) return error;
     return NextResponse.json({ error: "AI_REQUEST_FAILED" }, { status: 400 });
+  }
+}
+
+async function writeAiActionLog(data: Parameters<typeof prisma.aiActionLog.create>[0]["data"]) {
+  try {
+    await prisma.aiActionLog.create({ data });
+  } catch {
+    // AI logging is important for production audit, but it must not break local/demo fallback answers.
   }
 }
