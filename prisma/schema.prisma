@@ -1,0 +1,608 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+}
+
+enum CertificateReviewStatus {
+  PROCESSING
+  OCR_FAILED
+  PENDING_CONFIRMATION
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  MISSING_INFO
+  VALID
+  EXPIRING_SOON
+  EXPIRED
+  DUPLICATE_SUSPECTED
+  EXCLUDED_FROM_CYCLE
+}
+
+enum OcrStatus {
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+enum FileKind {
+  IMAGE
+  PDF
+}
+
+enum NotificationType {
+  CERTIFICATE_EXPIRING
+  MISSING_HOURS
+  MISSING_LICENSE
+  DUPLICATE_CERTIFICATE
+  CYCLE_ENDING
+  REVIEW_OVERDUE
+}
+
+enum ConversationType {
+  CHANNEL
+  DIRECT
+}
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum PlanTier {
+  TRIAL
+  CLINIC
+  HOSPITAL
+  ENTERPRISE
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+enum ReportArtifactKind {
+  EXCEL
+  PDF
+}
+
+enum AiActionStatus {
+  SUGGESTED
+  ACCEPTED
+  REJECTED
+  EXECUTED
+}
+
+model Tenant {
+  id                      String              @id @default(cuid())
+  name                    String
+  slug                    String              @unique
+  logoUrl                 String?
+  theme                   Json?
+  plan                    PlanTier            @default(TRIAL)
+  status                  TenantStatus        @default(TRIAL)
+  maxUsers                Int                 @default(25)
+  maxCertificatesPerMonth Int                 @default(200)
+  maxOcrPagesPerMonth     Int                 @default(200)
+  maxAiMessagesPerMonth   Int                 @default(100)
+  maxStorageGb            Int                 @default(5)
+  retentionDays           Int?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  users                   User[]
+  roles                   Role[]
+  departments             Department[]
+  positions               Position[]
+  certificateTypes        CertificateType[]
+  trainingCycles          TrainingCycle[]
+  certificates            Certificate[]
+  reports                 Report[]
+  notifications           Notification[]
+  conversations           Conversation[]
+  apiKeys                 ApiKey[]
+  auditLogs               AuditLog[]
+  settings                Setting[]
+  usageRecords            TenantUsageRecord[]
+  ocrJobs                 OcrJob[]
+  aiActions               AiActionLog[]
+}
+
+model TenantUsageRecord {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  period              String
+  activeUsers         Int      @default(0)
+  certificatesCreated Int      @default(0)
+  ocrPagesUsed        Int      @default(0)
+  aiMessagesUsed      Int      @default(0)
+  storageBytesUsed    BigInt   @default(0)
+  updatedAt           DateTime @updatedAt
+
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, period])
+}
+
+model User {
+  id              String            @id @default(cuid())
+  tenantId        String?
+  name            String
+  username        String            @unique
+  email           String            @unique
+  phone           String?
+  passwordHash    String?
+  avatarUrl       String?
+  licenseNumber   String?
+  licenseIssuedAt DateTime?
+  notes           String?
+  status          AccountStatus     @default(ACTIVE)
+  departmentId    String?
+  positionId      String?
+  roleId          String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  tenant          Tenant?           @relation(fields: [tenantId], references: [id])
+  department      Department?       @relation(fields: [departmentId], references: [id])
+  position        Position?         @relation(fields: [positionId], references: [id])
+  role            Role?             @relation(fields: [roleId], references: [id])
+  certificates    Certificate[]
+  summaries       TrainingSummary[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]        @relation("ActorLogs")
+  reports         Report[]          @relation("ReportCreator")
+  apiKeys         ApiKey[]
+  createdConversations Conversation[] @relation("ConversationCreator")
+  conversationMembers ConversationMember[]
+  messages        Message[]         @relation("MessageAuthor")
+  messageReads    MessageReadReceipt[]
+}
+
+model Role {
+  id          String       @id @default(cuid())
+  tenantId    String?
+  name        String       @unique
+  description String?
+  tenant      Tenant?      @relation(fields: [tenantId], references: [id])
+  users       User[]
+  permissions Permission[] @relation("RolePermissions")
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  key         String @unique
+  description String?
+  roles       Role[] @relation("RolePermissions")
+}
+
+model Department {
+  id          String        @id @default(cuid())
+  tenantId    String?
+  name        String        @unique
+  code        String?       @unique
+  description String?
+  tenant      Tenant?       @relation(fields: [tenantId], references: [id])
+  users       User[]
+  certificates Certificate[]
+}
+
+model Position {
+  id                  String        @id @default(cuid())
+  tenantId            String?
+  name                String        @unique
+  requiredHours       Int?
+  tenant              Tenant?       @relation(fields: [tenantId], references: [id])
+  users               User[]
+  certificates        Certificate[]
+}
+
+model CertificateType {
+  id          String        @id @default(cuid())
+  tenantId    String?
+  name        String        @unique
+  required    Boolean       @default(false)
+  description String?
+  tenant      Tenant?       @relation(fields: [tenantId], references: [id])
+  certificates Certificate[]
+}
+
+model TrainingCycle {
+  id            String            @id @default(cuid())
+  tenantId      String?
+  name          String
+  startYear     Int
+  endYear       Int
+  requiredHours Int
+  isActive      Boolean           @default(true)
+  tenant        Tenant?           @relation(fields: [tenantId], references: [id])
+  certificates  Certificate[]
+  summaries     TrainingSummary[]
+}
+
+model Certificate {
+  id                    String                  @id @default(cuid())
+  tenantId              String?
+  title                 String
+  holderId              String?
+  departmentId          String?
+  positionId            String?
+  certificateTypeId     String?
+  trainingCycleId       String?
+  issuingOrganization   String?
+  issuedDate            DateTime?
+  expiredDate           DateTime?
+  creditHours           Float                   @default(0)
+  certificateCode       String?                 @unique
+  courseContent         String?
+  fileUrl               String?
+  thumbnailUrl          String?
+  ocrStatus             OcrStatus               @default(QUEUED)
+  reviewStatus          CertificateReviewStatus @default(PENDING_REVIEW)
+  confidence            Float?
+  includeInCycle        Boolean                 @default(true)
+  notes                 String?
+  rejectionReason       String?
+  approvedAt            DateTime?
+  confirmedAt           DateTime?
+  reviewDueAt           DateTime?
+  reviewerId            String?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  tenant                Tenant?                 @relation(fields: [tenantId], references: [id])
+  holder                User?                   @relation(fields: [holderId], references: [id])
+  department            Department?             @relation(fields: [departmentId], references: [id])
+  position              Position?               @relation(fields: [positionId], references: [id])
+  certificateType       CertificateType?         @relation(fields: [certificateTypeId], references: [id])
+  trainingCycle         TrainingCycle?           @relation(fields: [trainingCycleId], references: [id])
+  files                 CertificateFile[]
+  ocrResults            CertificateOcrResult[]
+  ocrJobs               OcrJob[]
+  reviewEvents          CertificateReviewEvent[]
+
+  @@index([holderId, reviewStatus])
+  @@index([tenantId, reviewStatus])
+  @@index([issuedDate])
+}
+
+model CertificateFile {
+  id             String      @id @default(cuid())
+  certificateId  String
+  fileName       String
+  storageKey     String?
+  fileKind       FileKind
+  mimeType       String
+  sizeBytes      Int
+  url            String
+  thumbnailUrl   String?
+  checksum       String?
+  createdAt      DateTime    @default(now())
+
+  certificate    Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+}
+
+model CertificateOcrResult {
+  id             String      @id @default(cuid())
+  certificateId  String
+  provider       String
+  rawText        String
+  extractedJson  Json
+  confidence     Float
+  status         OcrStatus   @default(SUCCEEDED)
+  createdAt      DateTime    @default(now())
+
+  certificate    Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+}
+
+model OcrJob {
+  id             String      @id @default(cuid())
+  tenantId       String?
+  certificateId  String
+  status         JobStatus   @default(QUEUED)
+  provider       String
+  attempts       Int         @default(0)
+  input          Json?
+  result         Json?
+  error          String?
+  queuedAt       DateTime    @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  tenant         Tenant?     @relation(fields: [tenantId], references: [id])
+  certificate    Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([status, queuedAt])
+  @@index([tenantId, status])
+}
+
+model CertificateReviewEvent {
+  id             String                   @id @default(cuid())
+  certificateId  String
+  actorId        String?
+  fromStatus     CertificateReviewStatus?
+  toStatus       CertificateReviewStatus
+  note           String?
+  before         Json?
+  after          Json?
+  createdAt      DateTime                 @default(now())
+
+  certificate    Certificate              @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+}
+
+model TrainingSummary {
+  id             String        @id @default(cuid())
+  userId         String
+  cycleId        String
+  approvedHours  Float         @default(0)
+  requiredHours  Float
+  missingHours   Float
+  compliant      Boolean       @default(false)
+  updatedAt      DateTime      @updatedAt
+
+  user           User          @relation(fields: [userId], references: [id])
+  cycle          TrainingCycle @relation(fields: [cycleId], references: [id])
+
+  @@unique([userId, cycleId])
+}
+
+model Report {
+  id          String         @id @default(cuid())
+  tenantId    String?
+  name        String
+  type        String
+  filters     Json
+  createdById String?
+  createdAt   DateTime       @default(now())
+  tenant      Tenant?         @relation(fields: [tenantId], references: [id])
+  creator     User?          @relation("ReportCreator", fields: [createdById], references: [id])
+  shares      SharedReport[]
+  artifacts   ReportArtifact[]
+}
+
+model SharedReport {
+  id        String   @id @default(cuid())
+  reportId  String
+  tokenHash String   @unique
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  isActive  Boolean  @default(true)
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model ReportArtifact {
+  id          String             @id @default(cuid())
+  reportId    String
+  kind        ReportArtifactKind
+  storageKey  String?
+  url         String
+  sizeBytes   Int?
+  checksum    String?
+  createdAt   DateTime           @default(now())
+
+  report      Report             @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  actor       User?    @relation("ActorLogs", fields: [actorId], references: [id])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  tenantId    String?
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  createdById String?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  tenant      Tenant?    @relation(fields: [tenantId], references: [id])
+  creator     User?     @relation(fields: [createdById], references: [id])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  tenantId  String?
+  userId    String?
+  type      NotificationType
+  title     String
+  message   String
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  tenant    Tenant?          @relation(fields: [tenantId], references: [id])
+  user      User?            @relation(fields: [userId], references: [id])
+}
+
+model Conversation {
+  id          String               @id @default(cuid())
+  tenantId    String?
+  type        ConversationType
+  name        String?
+  description String?
+  isPrivate   Boolean              @default(false)
+  createdById String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  tenant      Tenant?              @relation(fields: [tenantId], references: [id])
+  createdBy   User?                @relation("ConversationCreator", fields: [createdById], references: [id])
+  members     ConversationMember[]
+  messages    Message[]
+
+  @@index([type, updatedAt])
+}
+
+model ConversationMember {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  role           String       @default("MEMBER")
+  lastReadAt     DateTime?
+  mutedAt        DateTime?
+  joinedAt       DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String               @id @default(cuid())
+  conversationId String
+  authorId       String?
+  body           String
+  createdAt      DateTime             @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+
+  conversation   Conversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author         User?                @relation("MessageAuthor", fields: [authorId], references: [id])
+  attachments    MessageAttachment[]
+  readReceipts   MessageReadReceipt[]
+
+  @@index([conversationId, createdAt])
+}
+
+model MessageAttachment {
+  id          String   @id @default(cuid())
+  messageId   String
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  url         String
+  createdAt   DateTime @default(now())
+
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model MessageReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
+}
+
+model AiActionLog {
+  id        String         @id @default(cuid())
+  tenantId  String?
+  actorId   String?
+  action    String
+  status    AiActionStatus @default(SUGGESTED)
+  prompt    String
+  toolName  String?
+  input     Json?
+  output    Json?
+  createdAt DateTime       @default(now())
+
+  tenant    Tenant?        @relation(fields: [tenantId], references: [id])
+}
+
+model Course {
+  id          String @id @default(cuid())
+  title       String
+  description String?
+  sessions    ClassSession[]
+  enrollments Enrollment[]
+}
+
+model ClassSession {
+  id        String   @id @default(cuid())
+  courseId  String
+  startsAt  DateTime
+  endsAt    DateTime
+  location  String?
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  attendance Attendance[]
+}
+
+model Enrollment {
+  id        String @id @default(cuid())
+  courseId  String
+  userId    String
+  status    String @default("ENROLLED")
+  course    Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+model Attendance {
+  id        String       @id @default(cuid())
+  sessionId String
+  userId    String
+  status    String       @default("PRESENT")
+  session   ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model Exam {
+  id        String        @id @default(cuid())
+  title     String
+  questions Question[]
+  attempts  ExamAttempt[]
+}
+
+model Question {
+  id        String @id @default(cuid())
+  examId    String
+  prompt    String
+  choices   Json
+  answerKey String
+  exam      Exam   @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model ExamAttempt {
+  id        String   @id @default(cuid())
+  examId    String
+  userId    String
+  score     Float?
+  answers   Json
+  createdAt DateTime @default(now())
+  exam      Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model CertificateTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  schema    Json
+  createdAt DateTime @default(now())
+}

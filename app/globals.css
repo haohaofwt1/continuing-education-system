@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 168 52% 97%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --muted: 166 32% 92%;
+  --muted-foreground: 215 16% 42%;
+  --primary: 173 80% 34%;
+  --primary-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 173 26% 86%;
+  --input: 173 26% 86%;
+  --ring: 173 80% 34%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(20, 184, 166, 0.14), transparent 30rem),
+    linear-gradient(180deg, #f0fdfa 0%, #f8fafc 38%, #ffffff 100%);
+  color: hsl(var(--foreground));
+}
+
+::selection {
+  background: rgba(20, 184, 166, 0.22);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #99f6e4;
+  border-radius: 999px;
+}
+
+.viewer-button {
+  display: inline-flex;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.viewer-button:hover {
+  border-color: rgba(94, 234, 212, 0.55);
+  background: rgba(20, 184, 166, 0.28);
+}
