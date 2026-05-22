@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { AlertTriangle, ClipboardCheck, Download, FileClock, FileText, Plus, Users } from "lucide-react";
 import { CertificateMonthlyChart, DepartmentHoursChart } from "@/components/dashboard/dashboard-charts";
 import { MetricCard } from "@/components/shared/metric-card";
@@ -8,7 +9,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DemoCertificate, downloadCsv, getCertificates, getEmployees } from "@/lib/demo-store";
+import { DemoCertificate, DemoEmployee, downloadCsv, getCertificates, getEmployees } from "@/lib/demo-store";
 import { departments } from "@/lib/mock-data";
 
 const cycleStart = new Date("2025-01-01T00:00:00");
@@ -16,8 +17,14 @@ const cycleEnd = new Date("2026-12-31T23:59:59");
 const today = new Date("2026-05-21T00:00:00");
 
 export function DashboardClient() {
-  const employees = getEmployees();
-  const certificates = getCertificates();
+  const [employees, setEmployees] = useState<DemoEmployee[]>([]);
+  const [certificates, setCertificates] = useState<DemoCertificate[]>([]);
+
+  useEffect(() => {
+    setEmployees(getEmployees());
+    setCertificates(getCertificates());
+  }, []);
+
   const cycleCertificates = certificates.filter((certificate) => isInCycle(certificate.issuedDate));
   const missingHours = employees.filter((employee) => employee.hours < employee.requiredHours);
   const missingLicense = employees.filter((employee) => !employee.licenseNumber || employee.status === "Thiếu CCHN");

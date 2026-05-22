@@ -66,7 +66,7 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
           formData.append("files", first);
           const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
           const uploadData = await uploadResponse.json();
-          storedFile = uploadData.files?.[0] ?? null;
+          storedFile = uploadResponse.ok ? uploadData.files?.[0] ?? null : null;
           setUploadedFile(storedFile);
           if (storedFile?.thumbnailUrl) setPreview(storedFile.thumbnailUrl);
         }
@@ -77,7 +77,7 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
         const ocrResponse = await fetch("/api/ocr", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileName: first?.name ?? "", fileUrl: storedFile?.url ?? "/placeholder-certificate.svg", rotation: autoRotation })
+          body: JSON.stringify({ fileName: first?.name ?? "", fileUrl: storedFile?.url ?? null, rotation: autoRotation })
         });
         const data = await ocrResponse.json();
         if (data.extracted) setExtracted(data.extracted);
