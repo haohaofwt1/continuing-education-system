@@ -59,7 +59,7 @@ export async function answerAssistantQuestion(question: string, context: Assista
     action,
     provider: openAiAnswer.answer ? "openai" : "local",
     model: openAiAnswer.answer ? openAiAnswer.model : null,
-    error: openAiAnswer.error
+    error: openAiAnswer.error ? normalizeOpenAiError(openAiAnswer.error) : undefined
   };
 }
 
@@ -97,6 +97,17 @@ async function answerWithOpenAI(question: string, context: AssistantContext) {
   const data = (await response.json()) as OpenAIResponse;
   const answer = data.output_text || data.output?.flatMap((item) => item.content ?? []).map((item) => item.text).filter(Boolean).join("\n") || "";
   return { answer: answer.trim(), model, error: undefined };
+}
+
+function normalizeOpenAiError(error: string) {
+  const lower = error.toLowerCase();
+  if (lower.includes("quota") || lower.includes("insufficient_quota") || lower.includes("429")) {
+    return "OPENAI_QUOTA_EXCEEDED";
+  }
+  if (lower.includes("401") || lower.includes("invalid authentication") || lower.includes("incorrect api key")) {
+    return "OPENAI_AUTH_FAILED";
+  }
+  return "OPENAI_UNAVAILABLE";
 }
 
 function answerFromLocalData(question: string, context: AssistantContext) {

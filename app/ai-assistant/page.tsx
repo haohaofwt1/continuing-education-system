@@ -63,7 +63,7 @@ export default function AiAssistantPage() {
           id: `a-${Date.now()}`,
           role: "assistant",
           content: data.answer ?? "Không có phản hồi từ AI.",
-          meta: data.provider === "openai" ? `OpenAI · ${data.model}` : data.error ? `Local fallback · ${data.error}` : "Local fallback"
+          meta: data.provider === "openai" ? `OpenAI · ${data.model}` : formatLocalFallbackMeta(data.error)
         }
       ]);
     } catch {
@@ -134,4 +134,11 @@ export default function AiAssistantPage() {
       </div>
     </>
   );
+}
+
+function formatLocalFallbackMeta(error?: string) {
+  if (error === "OPENAI_QUOTA_EXCEEDED") return "Local fallback · OpenAI API hết quota";
+  if (error === "OPENAI_AUTH_FAILED") return "Local fallback · OpenAI API key chưa hợp lệ";
+  if (error === "OPENAI_UNAVAILABLE") return "Local fallback · OpenAI tạm thời không khả dụng";
+  return "Local fallback";
 }
