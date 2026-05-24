@@ -16,6 +16,7 @@ const employeeSchema = z.object({
   position: z.string().optional().nullable(),
   role: z.string().optional().nullable(),
   licenseNumber: z.string().optional().nullable(),
+  licenseIssuedAt: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
   hours: z.number().optional().default(0),
   requiredHours: z.number().optional().default(48),
@@ -81,6 +82,7 @@ async function upsertEmployee(payload: z.infer<typeof employeeSchema>) {
     phone: payload.phone || null,
     avatarUrl: payload.avatarUrl || null,
     licenseNumber: payload.licenseNumber || null,
+    licenseIssuedAt: parseDate(payload.licenseIssuedAt),
     status: toAccountStatus(payload.status),
     departmentId: department?.id,
     positionId: position?.id,
@@ -125,6 +127,12 @@ async function upsertEmployee(payload: z.infer<typeof employeeSchema>) {
     where: { id: user.id },
     include: { department: true, position: true, role: true, summaries: { orderBy: { updatedAt: "desc" }, take: 1 } }
   });
+}
+
+function parseDate(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 async function findOrCreateDepartment(name?: string | null) {

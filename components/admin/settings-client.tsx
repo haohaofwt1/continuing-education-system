@@ -16,6 +16,7 @@ type AiSettingsStatus = {
 
 export function SettingsClient() {
   const [settings, setSettings] = useState(() => getSettings());
+  const [storageMode, setStorageMode] = useState<"database" | "demo">("demo");
   const [aiStatus, setAiStatus] = useState<AiSettingsStatus | null>(null);
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [openaiModel, setOpenaiModel] = useState("gpt-5-mini");
@@ -23,6 +24,16 @@ export function SettingsClient() {
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
+    fetch("/api/admin/settings")
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("API unavailable")))
+      .then((payload: { data: Record<string, unknown>; storage?: "database" }) => {
+        if (payload.data && Object.keys(payload.data).length > 0) {
+          setSettings((prev) => ({ ...prev, ...payload.data }));
+        }
+        setStorageMode(payload.storage === "database" ? "database" : "demo");
+      })
+      .catch(() => setStorageMode("demo"));
+
     fetch("/api/admin/ai-settings")
       .then((response) => response.json())
       .then((data: AiSettingsStatus) => {
@@ -31,6 +42,24 @@ export function SettingsClient() {
       })
       .catch(() => setAiStatus(null));
   }, []);
+
+  const saveGeneralSettings = async () => {
+    if (storageMode === "database") {
+      try {
+        await fetch("/api/admin/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(settings)
+        });
+        setNotice("Đã lưu cài đặt vào cơ sở dữ liệu.");
+      } catch {
+        setNotice("Không lưu được cài đặt vào cơ sở dữ liệu.");
+      }
+    } else {
+      saveSettings(settings);
+      setNotice("Đã lưu cài đặt demo.");
+    }
+  };
 
   const saveAiSettings = async () => {
     setSavingAi(true);
@@ -63,7 +92,9 @@ export function SettingsClient() {
           <Input value={settings.cycleEndYear} onChange={(event) => setSettings({ ...settings, cycleEndYear: Number(event.target.value) })} type="number" />
           <Input value={settings.ocrProvider} onChange={(event) => setSettings({ ...settings, ocrProvider: event.target.value })} />
           <Input value={settings.storageProvider} onChange={(event) => setSettings({ ...settings, storageProvider: event.target.value })} />
-          <Button className="md:col-span-2" onClick={() => { saveSettings(settings); setNotice("Đã lưu cài đặt demo."); }}>Lưu cài đặt</Button>
+          <Button className="md:col-span-2" onClick={saveGeneralSettings}>
+            {storageMode === "database" ? "Lưu vào Database" : "Lưu cài đặt Demo"}
+          </Button>
         </CardContent>
       </Card>
 

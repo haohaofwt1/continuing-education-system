@@ -87,6 +87,28 @@ enum AiActionStatus {
   EXECUTED
 }
 
+enum TrainingPlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum ComplianceCycleStatus {
+  ACTIVE
+  COMPLETED
+  OVERDUE
+  CLOSED
+}
+
 model Tenant {
   id                      String              @id @default(cuid())
   name                    String
@@ -120,6 +142,11 @@ model Tenant {
   usageRecords            TenantUsageRecord[]
   ocrJobs                 OcrJob[]
   aiActions               AiActionLog[]
+  trainingPlans           TrainingPlan[]
+  trainingReminders       TrainingReminder[]
+  compliancePolicies      CompliancePolicy[]
+  employeeComplianceCycles EmployeeComplianceCycle[]
+  creditRecords           CreditRecord[]
 }
 
 model TenantUsageRecord {
@@ -171,6 +198,12 @@ model User {
   conversationMembers ConversationMember[]
   messages        Message[]         @relation("MessageAuthor")
   messageReads    MessageReadReceipt[]
+  complianceCycles EmployeeComplianceCycle[]
+  creditRecords    CreditRecord[]
+  employeeTrainingPlans TrainingPlan[] @relation("TrainingPlanEmployee")
+  assignedTrainingPlans TrainingPlan[] @relation("TrainingPlanAssignee")
+  createdTrainingPlans  TrainingPlan[] @relation("TrainingPlanCreator")
+  trainingReminders     TrainingReminder[]
 }
 
 model Role {
@@ -209,6 +242,30 @@ model Position {
   tenant              Tenant?       @relation(fields: [tenantId], references: [id])
   users               User[]
   certificates        Certificate[]
+  compliancePolicyId  String?
+  compliancePolicy    CompliancePolicy? @relation(fields: [compliancePolicyId], references: [id])
+}
+
+model CompliancePolicy {
+  id                 String    @id @default(cuid())
+  tenantId           String?
+  name               String
+  code               String    @unique
+  cycleYears         Int       @default(5)
+  requiredHours      Float     @default(120)
+  annualMinimumHours Float     @default(12)
+  requiresLicense    Boolean   @default(true)
+  description        String?
+  isDefault          Boolean   @default(false)
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant             Tenant?   @relation(fields: [tenantId], references: [id])
+  positions          Position[]
+  cycles             EmployeeComplianceCycle[]
+
+  @@index([tenantId, isActive])
 }
 
 model CertificateType {
@@ -232,6 +289,55 @@ model TrainingCycle {
   tenant        Tenant?           @relation(fields: [tenantId], references: [id])
   certificates  Certificate[]
   summaries     TrainingSummary[]
+  plans         TrainingPlan[]
+}
+
+model TrainingPlan {
+  id             String             @id @default(cuid())
+  tenantId       String?
+  cycleId        String
+  employeeId     String
+  assignedToId   String?
+  createdById    String?
+  title          String
+  targetHours    Float
+  currentHours   Float              @default(0)
+  missingHours   Float
+  dueDate        DateTime
+  status         TrainingPlanStatus @default(ACTIVE)
+  notes          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  tenant         Tenant?            @relation(fields: [tenantId], references: [id])
+  cycle          TrainingCycle      @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employee       User               @relation("TrainingPlanEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedTo     User?              @relation("TrainingPlanAssignee", fields: [assignedToId], references: [id])
+  createdBy      User?              @relation("TrainingPlanCreator", fields: [createdById], references: [id])
+  reminders      TrainingReminder[]
+
+  @@index([tenantId, status, dueDate])
+  @@index([employeeId, cycleId])
+}
+
+model TrainingReminder {
+  id             String         @id @default(cuid())
+  tenantId       String?
+  planId         String
+  userId         String
+  channel        String         @default("in_app")
+  scheduledAt    DateTime
+  sentAt         DateTime?
+  status         ReminderStatus @default(SCHEDULED)
+  message        String
+  createdAt      DateTime       @default(now())
+
+  tenant         Tenant?        @relation(fields: [tenantId], references: [id])
+  plan           TrainingPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, scheduledAt])
+  @@index([userId, scheduledAt])
 }
 
 model Certificate {
@@ -274,10 +380,61 @@ model Certificate {
   ocrResults            CertificateOcrResult[]
   ocrJobs               OcrJob[]
   reviewEvents          CertificateReviewEvent[]
+  creditRecords         CreditRecord[]
 
   @@index([holderId, reviewStatus])
   @@index([tenantId, reviewStatus])
   @@index([issuedDate])
+}
+
+model EmployeeComplianceCycle {
+  id                 String                @id @default(cuid())
+  tenantId           String?
+  employeeId         String
+  policyId           String
+  startDate          DateTime
+  endDate            DateTime
+  requiredHours      Float
+  annualMinimumHours Float                 @default(0)
+  approvedHours      Float                 @default(0)
+  missingHours       Float
+  status             ComplianceCycleStatus @default(ACTIVE)
+  closedAt           DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  tenant             Tenant?               @relation(fields: [tenantId], references: [id])
+  employee           User                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  policy             CompliancePolicy      @relation(fields: [policyId], references: [id])
+  creditRecords      CreditRecord[]
+
+  @@index([tenantId, status, endDate])
+  @@index([employeeId, startDate, endDate])
+}
+
+model CreditRecord {
+  id                 String   @id @default(cuid())
+  tenantId           String?
+  employeeId         String
+  certificateId      String
+  cycleId            String?
+  creditDate         DateTime
+  hours              Float
+  includedInCycle    Boolean  @default(true)
+  excludeReason      String?
+  approvedById       String?
+  approvedAt         DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant             Tenant?  @relation(fields: [tenantId], references: [id])
+  employee           User     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  certificate        Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  cycle              EmployeeComplianceCycle? @relation(fields: [cycleId], references: [id])
+
+  @@index([tenantId, creditDate])
+  @@index([employeeId, creditDate])
+  @@unique([certificateId, employeeId, creditDate])
 }
 
 model CertificateFile {

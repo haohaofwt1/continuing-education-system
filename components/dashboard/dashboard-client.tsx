@@ -9,8 +9,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DemoCertificate, DemoEmployee, downloadCsv, getCertificates, getEmployees } from "@/lib/demo-store";
-import { departments } from "@/lib/mock-data";
+import { DemoCertificate, DemoEmployee, downloadCsv } from "@/lib/demo-store";
 
 const cycleStart = new Date("2025-01-01T00:00:00");
 const cycleEnd = new Date("2026-12-31T23:59:59");
@@ -21,8 +20,15 @@ export function DashboardClient() {
   const [certificates, setCertificates] = useState<DemoCertificate[]>([]);
 
   useEffect(() => {
-    setEmployees(getEmployees());
-    setCertificates(getCertificates());
+    fetch("/api/employees")
+      .then((res) => (res.ok ? res.json() : { data: [] }))
+      .then((payload) => setEmployees(payload.data))
+      .catch(() => setEmployees([]));
+
+    fetch("/api/certificates")
+      .then((res) => (res.ok ? res.json() : { data: [] }))
+      .then((payload) => setCertificates(payload.data))
+      .catch(() => setCertificates([]));
   }, []);
 
   const cycleCertificates = certificates.filter((certificate) => isInCycle(certificate.issuedDate));
@@ -36,7 +42,7 @@ export function DashboardClient() {
   const compliance = totalRequiredHours ? Math.round((totalHours / totalRequiredHours) * 100) : 0;
   const departmentsActive = new Set(employees.map((employee) => employee.department)).size;
   const monthlyData = buildMonthlyData(cycleCertificates);
-  const departmentHours = departments.map((department) => ({
+  const departmentHours = Array.from(new Set(employees.map((employee) => employee.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)).map((department) => ({
     department,
     hours: employees.filter((employee) => employee.department === department).reduce((sum, employee) => sum + employee.hours, 0)
   }));

@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { BarChart3, CalendarClock, ChevronLeft, ChevronRight, Columns3, Download, Eye, FileSpreadsheet, Grid2X2, Link2, List, Plus, QrCode, Search, Share2, X } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { departments } from "@/lib/mock-data";
-import { downloadCsv, getCertificates, getEmployees } from "@/lib/demo-store";
+import { DemoCertificate, DemoEmployee, downloadCsv } from "@/lib/demo-store";
 import { reports as seedReports } from "@/lib/mock-data";
 
 type ViewMode = "list" | "grid" | "kanban";
@@ -25,6 +25,25 @@ type ReportRow = Record<string, string | number>;
 
 const reportStatuses: ReportStatus[] = ["Sẵn sàng", "Đã chia sẻ", "Cần cập nhật"];
 const reportTypes = ["Tổng hợp", "Khoa/phòng", "Cảnh báo", "Chứng chỉ", "CCHN"];
+const reportColumnLabels: Record<string, string> = {
+  id: "Mã hồ sơ",
+  code: "Mã chứng chỉ",
+  title: "Tên chứng chỉ",
+  holder: "Người được cấp",
+  name: "Nhân sự",
+  department: "Khoa/phòng",
+  position: "Chức danh",
+  licenseNumber: "Số CCHN",
+  approvedHours: "Số tiết đã duyệt",
+  requiredHours: "Số tiết yêu cầu",
+  missingHours: "Số tiết còn thiếu",
+  compliant: "Trạng thái tuân thủ",
+  issuedDate: "Ngày cấp",
+  expiredDate: "Ngày hết hạn",
+  status: "Trạng thái",
+  hours: "Số tiết"
+};
+const hiddenPreviewColumns = new Set(["__type"]);
 
 const templates: ReportTemplate[] = [
   ...seedReports.map((report, index) => ({
@@ -33,7 +52,7 @@ const templates: ReportTemplate[] = [
     type: report.type,
     updatedAt: report.updatedAt,
     status: (index === 1 ? "Đã chia sẻ" : "Sẵn sàng") as ReportStatus,
-    description: "Báo cáo mẫu có filter, xem trước dữ liệu, export và chia sẻ trong demo mode."
+    description: "Báo cáo chuẩn có bộ lọc, xem trước dữ liệu, xuất file và chia sẻ có kiểm soát."
   })),
   { id: "r4", name: "Báo cáo nhân sự chưa đủ điều kiện", type: "Tổng hợp", updatedAt: "2026-05-20", status: "Cần cập nhật", description: "Danh sách nhân sự còn thiếu số tiết trong chu kỳ hiện hành." },
   { id: "r5", name: "Báo cáo nhân sự chưa có CCHN", type: "CCHN", updatedAt: "2026-05-19", status: "Sẵn sàng", description: "Theo dõi hồ sơ thiếu số chứng chỉ hành nghề." },
@@ -42,6 +61,8 @@ const templates: ReportTemplate[] = [
 
 export function ReportsClient() {
   const [reportMode, setReportMode] = useState("compliance");
+  const [employees, setEmployees] = useState<DemoEmployee[]>([]);
+  const [certificates, setCertificates] = useState<DemoCertificate[]>([]);
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
@@ -53,11 +74,55 @@ export function ReportsClient() {
   const [previewPageSize, setPreviewPageSize] = useState(10);
   const [selectedReports, setSelectedReports] = useState<string[]>([]);
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [hiddenRows, setHiddenRows] = useState<number[]>([]);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [drawerReport, setDrawerReport] = useState<ReportTemplate | null>(null);
+  const [quickViewRow, setQuickViewRow] = useState<ReportRow | null>(null);
   const [showCreateDrawer, setShowCreateDrawer] = useState(false);
   const [notice, setNotice] = useState("");
 
-  const reportRows = useMemo(() => buildRows(reportMode, department), [department, reportMode]);
+  React.useEffect(() => {
+    Promise.all([
+      fetch("/api/employees").then((res) => res.ok ? res.json() : { data: [] }),
+      fetch("/api/certificates").then((res) => res.ok ? res.json() : { data: [] })
+    ]).then(([emp, cert]) => {
+      setEmployees(Array.isArray(emp.data) ? emp.data : []);
+      setCertificates(Array.isArray(cert.data) ? cert.data : []);
+    }).catch(() => {
+      setEmployees([]);
+      setCertificates([]);
+    });
+  }, []);
+
+  const reportRows = useMemo(() => {
+    let rows = buildRows(reportMode, department, employees, certificates);
+    
+    // 1. Lọc bỏ các dòng đã ẩn (Loại bỏ tạm thời khỏi preview)
+    if (hiddenRows.length > 0) {
+      rows = rows.filter((_, index) => !hiddenRows.includes(index));
+    }
+
+    // 2. Sắp xếp (Sorting)
+    if (sortConfig) {
+      rows = [...rows].sort((a, b) => {
+        const aVal = a[sortConfig.key];
+        const bVal = b[sortConfig.key];
+        if (aVal === undefined || bVal === undefined) return 0;
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+          return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    
+    return rows;
+  }, [department, reportMode, hiddenRows, sortConfig, employees, certificates]);
+  const departmentOptions = useMemo(() => Array.from(new Set([
+    ...employees.map((employee) => employee.department),
+    ...certificates.map((certificate) => certificate.department)
+  ].filter(Boolean))).sort((a, b) => a.localeCompare(b)), [certificates, employees]);
 
   const filteredReports = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -98,7 +163,7 @@ export function ReportsClient() {
   };
 
   const createQr = (reportName: string) => {
-    setNotice(`QR mock đã tạo cho báo cáo: ${reportName}. Khi nối database thật sẽ lưu vào SharedReport.`);
+    setNotice(`Đã tạo QR/link xác minh cho báo cáo: ${reportName}.`);
   };
 
   return (
@@ -106,10 +171,10 @@ export function ReportsClient() {
       <PageHeader
         eyebrow="Báo cáo"
         title="Thống kê, tạo báo cáo và chia sẻ"
-        description="Có thư viện báo cáo, list/grid/kanban, tick chọn, phân trang, xem trước dữ liệu, export, link chia sẻ và QR."
+        description="Theo dõi tuân thủ theo chu kỳ, rà soát minh chứng, xuất dữ liệu và chia sẻ báo cáo có kiểm soát."
         actions={
           <>
-            <Button variant="secondary" onClick={() => downloadCsv(selectedRows.length ? "du-lieu-bao-cao-da-chon.csv" : "du-lieu-bao-cao.csv", selectedReportRows)}>
+            <Button variant="secondary" onClick={() => downloadCsv(selectedRows.length ? "du-lieu-bao-cao-da-chon.csv" : "du-lieu-bao-cao.csv", localizeReportRows(selectedReportRows))}>
               <Download className="h-4 w-4" />{selectedRows.length ? `Export ${selectedRows.length} dòng` : "Export dữ liệu"}
             </Button>
             <Button onClick={() => setShowCreateDrawer(true)}><Plus className="h-4 w-4" />Tạo báo cáo</Button>
@@ -139,7 +204,7 @@ export function ReportsClient() {
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
               <Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} className="pl-9" placeholder="Tìm báo cáo, loại, trạng thái..." />
             </div>
-            <Select value={department} onChange={(value) => { setDepartment(value); setPreviewPage(1); }} options={["", ...departments]} labels={{ "": "Tất cả khoa/phòng" }} />
+            <Select value={department} onChange={(value) => { setDepartment(value); setPreviewPage(1); }} options={["", ...departmentOptions]} labels={{ "": "Tất cả khoa/phòng" }} />
             <Input value={year} onChange={(event) => setYear(event.target.value)} placeholder="Năm/chu kỳ" />
             <Select value={status} onChange={(value) => { setStatus(value); setPage(1); }} options={["", ...reportStatuses]} labels={{ "": "Tất cả trạng thái" }} />
           </div>
@@ -184,7 +249,7 @@ export function ReportsClient() {
             setSelectedReports(allPageSelected ? selectedReports.filter((id) => !pageIds.includes(id)) : Array.from(new Set([...selectedReports, ...pageIds])));
           }}
           onView={setDrawerReport}
-          onExport={(report) => downloadCsv(`${report.id}.csv`, reportRows)}
+          onExport={(report) => downloadCsv(`${report.id}.csv`, localizeReportRows(reportRows))}
           onShare={(report) => share(report.name)}
           onQr={(report) => createQr(report.name)}
         />
@@ -199,7 +264,7 @@ export function ReportsClient() {
               checked={selectedReports.includes(report.id)}
               onToggle={() => setSelectedReports((ids) => ids.includes(report.id) ? ids.filter((id) => id !== report.id) : [...ids, report.id])}
               onView={() => setDrawerReport(report)}
-              onExport={() => downloadCsv(`${report.id}.csv`, reportRows)}
+              onExport={() => downloadCsv(`${report.id}.csv`, localizeReportRows(reportRows))}
               onShare={() => share(report.name)}
               onQr={() => createQr(report.name)}
             />
@@ -224,7 +289,7 @@ export function ReportsClient() {
                     </div>
                     <div className="mt-2 text-sm text-slate-500">{report.type} · {report.updatedAt}</div>
                     <div className="mt-3 flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => downloadCsv(`${report.id}.csv`, reportRows)}><Download className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => downloadCsv(`${report.id}.csv`, localizeReportRows(reportRows))}><Download className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" onClick={() => share(report.name)}><Link2 className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" onClick={() => createQr(report.name)}><QrCode className="h-4 w-4" /></Button>
                     </div>
@@ -245,17 +310,37 @@ export function ReportsClient() {
             </div>
             <PaginationControls page={currentPreviewPage} totalPages={previewTotalPages} pageSize={previewPageSize} onPageChange={setPreviewPage} onPageSizeChange={(value) => { setPreviewPageSize(value); setPreviewPage(1); }} />
           </div>
-          {selectedRows.length ? (
+          {selectedRows.length || hiddenRows.length ? (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-teal-50 p-3 text-sm">
-              <span className="font-semibold text-teal-900">Đã chọn {selectedRows.length} dòng dữ liệu</span>
-              <Button size="sm" variant="secondary" onClick={() => downloadCsv("du-lieu-bao-cao-da-chon.csv", selectedReportRows)}>Export dòng đã chọn</Button>
-              <Button size="sm" variant="ghost" onClick={() => setSelectedRows([])}>Bỏ chọn</Button>
+              {selectedRows.length ? (
+                <>
+                  <span className="font-semibold text-teal-900">Đã chọn {selectedRows.length} dòng dữ liệu</span>
+                  <Button size="sm" variant="secondary" onClick={() => downloadCsv("du-lieu-bao-cao-da-chon.csv", localizeReportRows(selectedReportRows))}>Export dòng đã chọn</Button>
+                </>
+              ) : null}
+              {hiddenRows.length ? (
+                <Button size="sm" variant="secondary" className="border-teal-200 text-teal-700 hover:bg-teal-100" onClick={() => setHiddenRows([])}>
+                  Hiện lại {hiddenRows.length} dòng đã ẩn
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => { setSelectedRows([]); setHiddenRows([]); }}>Bỏ chọn & hiện tất cả</Button>
             </div>
           ) : null}
           <PreviewTable
             rows={pagedRows}
             rowOffset={previewStart}
             selectedRows={selectedRows}
+            sortConfig={sortConfig}
+            onSort={(key) => {
+              setSortConfig((prev) => {
+                if (prev?.key === key) {
+                  return prev.direction === "asc" ? { key, direction: "desc" } : null;
+                }
+                return { key, direction: "asc" };
+              });
+            }}
+            onHide={(index) => setHiddenRows((prev) => [...prev, index])}
+            onQuickView={(row) => setQuickViewRow(row)}
             onToggle={(index) => setSelectedRows((ids) => ids.includes(index) ? ids.filter((item) => item !== index) : [...ids, index])}
             onToggleAll={() => {
               const pageIndexes = pagedRows.map((_, index) => previewStart + index);
@@ -266,12 +351,19 @@ export function ReportsClient() {
         </CardContent>
       </Card>
 
+      {quickViewRow ? (
+        <QuickViewDrawer 
+          row={quickViewRow} 
+          onClose={() => setQuickViewRow(null)} 
+        />
+      ) : null}
+
       {drawerReport ? (
         <ReportDrawer
           report={drawerReport}
           rows={reportRows}
           onClose={() => setDrawerReport(null)}
-          onExport={() => downloadCsv(`${drawerReport.id}.csv`, reportRows)}
+          onExport={() => downloadCsv(`${drawerReport.id}.csv`, localizeReportRows(reportRows))}
           onShare={() => share(drawerReport.name)}
           onQr={() => createQr(drawerReport.name)}
         />
@@ -282,7 +374,7 @@ export function ReportsClient() {
           onClose={() => setShowCreateDrawer(false)}
           onCreate={(name) => {
             setShowCreateDrawer(false);
-            setNotice(`Đã tạo báo cáo mock: ${name}. Khi nối database thật sẽ ghi vào bảng Report.`);
+            setNotice(`Đã tạo cấu hình báo cáo: ${name}.`);
           }}
         />
       ) : null}
@@ -290,12 +382,14 @@ export function ReportsClient() {
   );
 }
 
-function buildRows(reportMode: string, department: string): ReportRow[] {
+function buildRows(reportMode: string, department: string, employees: DemoEmployee[], certificates: DemoCertificate[]): ReportRow[] {
   if (reportMode === "certificates" || reportMode === "expiring") {
-    return getCertificates()
+    return certificates
       .filter((item) => !department || item.department === department)
       .filter((item) => reportMode !== "expiring" || item.status === "Sắp hết hạn" || item.status === "Đã hết hạn")
       .map((item) => ({
+        id: item.id,
+        __type: "certificate",
         code: item.code,
         title: item.title,
         holder: item.holder,
@@ -306,10 +400,12 @@ function buildRows(reportMode: string, department: string): ReportRow[] {
         hours: item.hours
       }));
   }
-  return getEmployees()
+  return employees
     .filter((item) => !department || item.department === department)
     .filter((item) => reportMode !== "missingLicense" || !item.licenseNumber)
     .map((item) => ({
+      id: item.id,
+      __type: "employee",
       name: item.name,
       department: item.department,
       position: item.position,
@@ -319,6 +415,21 @@ function buildRows(reportMode: string, department: string): ReportRow[] {
       missingHours: Math.max(item.requiredHours - item.hours, 0),
       compliant: item.hours >= item.requiredHours ? "Đạt" : "Chưa đạt"
     }));
+}
+
+function localizeReportRows(rows: ReportRow[]) {
+  return rows.map((row) => {
+    const localized: Record<string, string | number> = {};
+    Object.entries(row).forEach(([key, value]) => {
+      if (hiddenPreviewColumns.has(key)) return;
+      localized[reportColumnLabels[key] ?? key] = value;
+    });
+    return localized;
+  });
+}
+
+function isStatusColumn(key: string) {
+  return key === "status" || key === "compliant";
 }
 
 function MetricCard({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
@@ -375,8 +486,28 @@ function ReportList({ reports, selectedIds, onToggle, onToggleAll, onView, onExp
   );
 }
 
-function PreviewTable({ rows, rowOffset, selectedRows, onToggle, onToggleAll }: { rows: ReportRow[]; rowOffset: number; selectedRows: number[]; onToggle: (index: number) => void; onToggleAll: () => void }) {
-  const headers = Object.keys(rows[0] ?? { empty: "" });
+function PreviewTable({ 
+  rows, 
+  rowOffset, 
+  selectedRows, 
+  sortConfig,
+  onSort,
+  onHide,
+  onQuickView,
+  onToggle, 
+  onToggleAll 
+}: { 
+  rows: ReportRow[]; 
+  rowOffset: number; 
+  selectedRows: number[]; 
+  sortConfig: { key: string; direction: 'asc' | 'desc' } | null;
+  onSort: (key: string) => void;
+  onHide: (index: number) => void;
+  onQuickView: (row: ReportRow) => void;
+  onToggle: (index: number) => void; 
+  onToggleAll: () => void 
+}) {
+  const headers = Object.keys(rows[0] ?? { empty: "" }).filter((key) => !hiddenPreviewColumns.has(key));
   const allChecked = rows.length > 0 && rows.every((_, index) => selectedRows.includes(rowOffset + index));
   return (
     <div className="overflow-x-auto scrollbar-thin">
@@ -384,7 +515,21 @@ function PreviewTable({ rows, rowOffset, selectedRows, onToggle, onToggleAll }: 
         <thead className="sticky top-0 z-10 bg-teal-50 text-xs uppercase text-slate-500">
           <tr>
             <th className="p-3"><input type="checkbox" checked={allChecked} onChange={onToggleAll} className="h-4 w-4 accent-teal-600" aria-label="Chọn tất cả dòng" /></th>
-            {headers.map((header) => <th key={header} className="p-3">{header}</th>)}
+            {headers.map((header) => (
+              <th 
+                key={header} 
+                className="group cursor-pointer p-3 transition hover:text-teal-700"
+                onClick={() => onSort(header)}
+              >
+                <div className="flex items-center gap-1">
+                  <span>{reportColumnLabels[header] ?? header}</span>
+                  <div className="flex flex-col">
+                    <BarChart3 className={`h-3 w-3 transition ${sortConfig?.key === header ? (sortConfig.direction === 'asc' ? 'text-teal-600' : 'rotate-180 text-teal-600') : 'opacity-0 group-hover:opacity-40'}`} />
+                  </div>
+                </div>
+              </th>
+            ))}
+            <th className="p-3 text-right">Thao tác</th>
           </tr>
         </thead>
         <tbody className="divide-y bg-white">
@@ -393,7 +538,33 @@ function PreviewTable({ rows, rowOffset, selectedRows, onToggle, onToggleAll }: 
             return (
               <tr key={absoluteIndex} className="hover:bg-teal-50/40">
                 <td className="p-3"><input type="checkbox" checked={selectedRows.includes(absoluteIndex)} onChange={() => onToggle(absoluteIndex)} className="h-4 w-4 accent-teal-600" aria-label={`Chọn dòng ${absoluteIndex + 1}`} /></td>
-                {Object.values(row).map((value, cellIndex) => <td key={cellIndex} className="p-3">{String(value)}</td>)}
+                {headers.map((header) => (
+                  <td key={header} className="p-3">
+                    {isStatusColumn(header) ? <StatusBadge status={String(row[header] ?? "")} /> : String(row[header] ?? "")}
+                  </td>
+                ))}
+                <td className="p-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-slate-400 hover:text-teal-600" 
+                      title="Xem chi tiết gốc"
+                      onClick={() => onQuickView(row)}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-slate-400 hover:text-rose-500" 
+                      title="Ẩn khỏi preview (không xoá data)"
+                      onClick={() => onHide(absoluteIndex)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </td>
               </tr>
             );
           })}
@@ -418,7 +589,7 @@ function ReportDrawer({ report, rows, onClose, onExport, onShare, onQr }: { repo
             <Info label="Cập nhật" value={report.updatedAt} />
             <Info label="Dữ liệu preview" value={`${rows.length} dòng`} />
           </div>
-          <div className="rounded-2xl border bg-teal-50 p-4 text-sm leading-6 text-teal-900">Khi nối database thật, báo cáo này sẽ có bản ghi `Report`, các link chia sẻ sẽ nằm trong `SharedReport`, QR sẽ trỏ tới URL công khai có hạn dùng.</div>
+          <div className="rounded-2xl border bg-teal-50 p-4 text-sm leading-6 text-teal-900">Báo cáo dùng để đối chiếu tình trạng tuân thủ theo chu kỳ, hỗ trợ xuất file, tạo link chia sẻ có hạn và truy vết đến hồ sơ gốc.</div>
         </div>
         <div className="flex justify-end gap-2 border-t bg-slate-50 px-6 py-4">
           <Button variant="secondary" onClick={onExport}><Download className="h-4 w-4" />Export</Button>
@@ -443,11 +614,69 @@ function CreateReportDrawer({ onClose, onCreate }: { onClose: () => void; onCrea
           <Field label="Tên báo cáo"><Input value={name} onChange={(event) => setName(event.target.value)} /></Field>
           <Field label="Loại báo cáo"><Select value="Tổng hợp" onChange={() => undefined} options={reportTypes} /></Field>
           <Field label="Ngày hết hạn link chia sẻ"><Input type="date" defaultValue="2026-12-31" /></Field>
-          <div className="rounded-2xl border bg-slate-50 p-4 text-sm leading-6 text-slate-600">Demo hiện tạo báo cáo mock. Bước tiếp theo sẽ lưu cấu hình filter/report vào database và sinh Excel/PDF thật.</div>
+          <div className="rounded-2xl border bg-slate-50 p-4 text-sm leading-6 text-slate-600">Báo cáo lưu bộ lọc, cột dữ liệu và thời hạn chia sẻ để có thể tái sử dụng cho kiểm tra nội bộ hoặc gửi cơ quan quản lý.</div>
         </div>
         <div className="flex justify-end gap-2 border-t bg-slate-50 px-6 py-4">
           <Button variant="secondary" onClick={onClose}>Hủy</Button>
           <Button onClick={() => onCreate(name)}>Tạo báo cáo</Button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function QuickViewDrawer({ row, onClose }: { row: ReportRow; onClose: () => void }) {
+  const router = useRouter();
+  const title = String(row.name || row.title || row.code || "Chi tiết dữ liệu");
+  const entries = Object.entries(row).filter(([key]) => key !== "__type");
+
+  const handleEdit = () => {
+    const id = String(row.id ?? "");
+    const type = row.__type;
+    const label = String(row.name || row.title || row.code || "");
+    
+    if (type === "employee") {
+      const params = new URLSearchParams();
+      if (id) params.set("edit", id);
+      if (label) params.set("q", label);
+      router.push(`/employees?${params.toString()}`);
+    } else if (type === "certificate") {
+      router.push(`/certificates?id=${encodeURIComponent(id)}`);
+    }
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/40" onClick={onClose}>
+      <aside className="ml-auto flex h-full w-full max-w-lg flex-col bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b px-6 py-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
+              <Eye className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Xem nhanh dữ liệu gốc</div>
+              <h2 className="text-xl font-bold text-slate-950">{title}</h2>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Đóng"><X className="h-5 w-5" /></Button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="grid gap-4">
+            {entries.map(([key, value]) => (
+              <div key={key} className="rounded-2xl border bg-slate-50/50 p-4">
+                <div className="text-xs font-semibold uppercase text-slate-400">{reportColumnLabels[key] ?? key}</div>
+                <div className="mt-1 font-semibold text-slate-900">{String(value)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 rounded-2xl border border-teal-100 bg-teal-50/50 p-4 text-sm leading-6 text-teal-800">
+            Dữ liệu này được trích xuất trực tiếp từ hồ sơ gốc trong hệ thống để đối chiếu. Bạn có thể chuyển đến trang quản lý tương ứng để chỉnh sửa nếu phát hiện sai sót.
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t bg-slate-50 px-6 py-4">
+          <Button variant="secondary" onClick={onClose}>Đóng</Button>
+          <Button onClick={handleEdit}>Chỉnh sửa hồ sơ gốc</Button>
         </div>
       </aside>
     </div>

@@ -12,7 +12,20 @@ import { departments, positions } from "@/lib/mock-data";
 import { DemoEmployee, downloadCsv, getEmployees, saveEmployees } from "@/lib/demo-store";
 
 type CategoryKind = "Khoa/phòng" | "Chức danh" | "Loại chứng chỉ" | "Đơn vị cấp" | "Chu kỳ đào tạo";
-type CategoryItem = { id: string; kind: CategoryKind; name: string; status: "Hoạt động" | "Tạm khóa"; note: string };
+type CategoryItem = {
+  id: string;
+  kind: CategoryKind;
+  name: string;
+  status: "Hoạt động" | "Tạm khóa";
+  note: string;
+  code?: string;
+  parentName?: string;
+  managerName?: string;
+  policyName?: string;
+  requiredHours?: number;
+  annualMinimumHours?: number;
+  requiresLicense?: boolean;
+};
 type AuditItem = { id: string; actor: string; action: string; module: string; target: string; at: string; ip: string };
 type ApiKeyItem = { id: string; name: string; maskedKey: string; status: "Hoạt động" | "Tạm khóa"; lastUsed: string; createdAt: string };
 type QrItem = { id: string; name: string; type: "Chứng chỉ" | "Báo cáo"; url: string; createdBy: string; expiresAt: string; status: "Hoạt động" | "Hết hạn" };
@@ -22,11 +35,11 @@ const accountStatuses = ["Hoạt động", "Thiếu CCHN", "Tạm khóa"];
 const categoryKinds: CategoryKind[] = ["Khoa/phòng", "Chức danh", "Loại chứng chỉ", "Đơn vị cấp", "Chu kỳ đào tạo"];
 
 const categorySeed: CategoryItem[] = [
-  ...departments.map((name, index) => ({ id: `dep-${index}`, kind: "Khoa/phòng" as CategoryKind, name, status: "Hoạt động" as const, note: "Danh mục khoa/phòng" })),
-  ...positions.map((name, index) => ({ id: `pos-${index}`, kind: "Chức danh" as CategoryKind, name, status: "Hoạt động" as const, note: "Danh mục chức danh" })),
+  ...departments.map((name, index) => ({ id: `dep-${index}`, kind: "Khoa/phòng" as CategoryKind, name, code: `KP${String(index + 1).padStart(2, "0")}`, managerName: "", status: "Hoạt động" as const, note: "Đơn vị chịu trách nhiệm theo dõi nhân sự và nhắc việc" })),
+  ...positions.map((name, index) => ({ id: `pos-${index}`, kind: "Chức danh" as CategoryKind, name, code: `CD${String(index + 1).padStart(2, "0")}`, policyName: "CME 120 tiết / 5 năm", requiredHours: 120, annualMinimumHours: 12, requiresLicense: true, status: "Hoạt động" as const, note: "Gán chính sách tuân thủ mặc định cho nhân sự" })),
   ...["Cập nhật kiến thức y khoa liên tục", "Kiểm soát nhiễm khuẩn", "Cấp cứu", "An toàn người bệnh"].map((name, index) => ({ id: `type-${index}`, kind: "Loại chứng chỉ" as CategoryKind, name, status: "Hoạt động" as const, note: "Loại chứng chỉ" })),
   ...["Bệnh viện Trung tâm", "Sở Y tế", "Trường Đại học Y Dược"].map((name, index) => ({ id: `issuer-${index}`, kind: "Đơn vị cấp" as CategoryKind, name, status: "Hoạt động" as const, note: "Đơn vị cấp chứng chỉ" })),
-  { id: "cycle-2025", kind: "Chu kỳ đào tạo", name: "Chu kỳ 2025-2026", status: "Hoạt động", note: "48 tiết mặc định" }
+  { id: "cycle-2024", kind: "Chu kỳ đào tạo", name: "Chu kỳ cá nhân 5 năm", code: "CME-5Y", status: "Hoạt động", note: "120 tiết / 5 năm, tối thiểu 12 tiết mỗi năm" }
 ];
 
 const auditSeed: AuditItem[] = [
@@ -157,7 +170,21 @@ export function CategoriesAdminClient() {
     event.preventDefault();
     if (!editing) return;
     const form = new FormData(event.currentTarget);
-    const next: CategoryItem = { ...editing, id: editing.id || `cat-${Date.now()}`, kind: String(form.get("kind")) as CategoryKind, name: String(form.get("name") ?? ""), status: String(form.get("status")) as CategoryItem["status"], note: String(form.get("note") ?? "") };
+    const next: CategoryItem = {
+      ...editing,
+      id: editing.id || `cat-${Date.now()}`,
+      kind: String(form.get("kind")) as CategoryKind,
+      code: String(form.get("code") ?? ""),
+      name: String(form.get("name") ?? ""),
+      parentName: String(form.get("parentName") ?? ""),
+      managerName: String(form.get("managerName") ?? ""),
+      policyName: String(form.get("policyName") ?? ""),
+      requiredHours: Number(form.get("requiredHours") || 0),
+      annualMinimumHours: Number(form.get("annualMinimumHours") || 0),
+      requiresLicense: form.get("requiresLicense") === "on",
+      status: String(form.get("status")) as CategoryItem["status"],
+      note: String(form.get("note") ?? "")
+    };
     persist(items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items], "Đã lưu danh mục.");
     setEditing(null);
   };
@@ -169,7 +196,7 @@ export function CategoriesAdminClient() {
 
   return (
     <>
-      <PageHeader eyebrow="Quản trị" title="Danh mục" description="List compact kiểu Odoo: nhóm bên trái, bảng bên phải, thêm/sửa/xóa nhanh." actions={<Button onClick={() => setEditing({ id: "", kind: kind || "Khoa/phòng", name: "", status: "Hoạt động", note: "" })}><Plus className="h-4 w-4" />Thêm danh mục</Button>} />
+      <PageHeader eyebrow="Quản trị" title="Danh mục tổ chức" description="Quản lý khoa/phòng, chức danh và chính sách đào tạo để tự gán chu kỳ tuân thủ cho nhân sự." actions={<Button onClick={() => setEditing({ id: "", kind: kind || "Khoa/phòng", name: "", status: "Hoạt động", note: "" })}><Plus className="h-4 w-4" />Thêm danh mục</Button>} />
       <Notice text={notice} />
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
@@ -216,16 +243,18 @@ export function CategoriesAdminClient() {
               <thead className="sticky top-0 bg-teal-50 text-xs uppercase text-slate-500">
                 <tr>
                   <th className="p-4"><input type="checkbox" checked={pageItems.length > 0 && pageItems.every((item) => selectedIds.includes(item.id))} onChange={() => togglePage(pageItems.map((item) => item.id), selectedIds, setSelectedIds)} className="h-4 w-4 accent-teal-600" /></th>
-                  <th>Tên danh mục</th><th>Nhóm</th><th>Ghi chú</th><th>Trạng thái</th><th className="pr-4">Thao tác</th>
+                  <th>Mã</th><th>Tên danh mục</th><th>Nhóm</th><th>Chính sách / phụ trách</th><th>Yêu cầu</th><th>Trạng thái</th><th className="pr-4">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y bg-white">
                 {pageItems.map((item) => (
                   <tr key={item.id} className="hover:bg-teal-50/40">
                     <td className="p-4"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleOne(item.id, setSelectedIds)} className="h-4 w-4 accent-teal-600" /></td>
-                    <td className="py-3 font-semibold text-slate-950">{item.name}</td>
+                    <td className="py-3 font-semibold text-slate-600">{item.code || "Chưa có"}</td>
+                    <td className="font-semibold text-slate-950"><div>{item.name}</div><div className="mt-1 text-xs font-normal text-slate-500">{item.note || "Chưa có ghi chú"}</div></td>
                     <td>{item.kind}</td>
-                    <td className="max-w-md truncate text-slate-500">{item.note || "Chưa có ghi chú"}</td>
+                    <td className="max-w-md text-slate-600">{item.kind === "Khoa/phòng" ? (item.managerName || "Chưa gán phụ trách") : (item.policyName || "Chưa gán policy")}</td>
+                    <td>{item.requiredHours ? `${item.requiredHours} tiết${item.annualMinimumHours ? ` · ${item.annualMinimumHours}/năm` : ""}` : "Theo cấu hình"}</td>
                     <td><StatusBadge status={item.status} /></td>
                     <td className="pr-4"><div className="flex gap-1"><Button size="icon" variant="ghost" onClick={() => setEditing(item)} aria-label="Sửa"><Edit3 className="h-4 w-4" /></Button><Button size="icon" variant="ghost" onClick={() => setDeleteTarget(item)} aria-label="Xóa"><Trash2 className="h-4 w-4" /></Button></div></td>
                   </tr>
@@ -300,7 +329,32 @@ function AccountForm({ account, onSubmit, onCancel }: { account: DemoEmployee; o
 }
 
 function CategoryForm({ item, onSubmit, onCancel }: { item: CategoryItem; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; onCancel: () => void }) {
-  return <Card className="mt-4"><CardContent className="p-5"><form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-4"><Field label="Nhóm"><Select name="kind" defaultValue={item.kind} options={categoryKinds} /></Field><Field label="Tên danh mục"><Input name="name" defaultValue={item.name} required /></Field><Field label="Trạng thái"><Select name="status" defaultValue={item.status} options={["Hoạt động", "Tạm khóa"]} /></Field><Field label="Ghi chú"><Input name="note" defaultValue={item.note} /></Field><div className="md:col-span-4 flex gap-2"><Button type="submit"><Check className="h-4 w-4" />Lưu</Button><Button type="button" variant="secondary" onClick={onCancel}><X className="h-4 w-4" />Hủy</Button></div></form></CardContent></Card>;
+  return (
+    <Card className="mt-4">
+      <CardContent className="p-5">
+        <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-4">
+          <Field label="Nhóm"><Select name="kind" defaultValue={item.kind} options={categoryKinds} /></Field>
+          <Field label="Mã"><Input name="code" defaultValue={item.code || ""} placeholder="VD: KP01, BS, CME-5Y" /></Field>
+          <Field label="Tên danh mục"><Input name="name" defaultValue={item.name} required /></Field>
+          <Field label="Trạng thái"><Select name="status" defaultValue={item.status} options={["Hoạt động", "Tạm khóa"]} /></Field>
+          <Field label="Khoa/phòng cha"><Input name="parentName" defaultValue={item.parentName || ""} /></Field>
+          <Field label="Người phụ trách"><Input name="managerName" defaultValue={item.managerName || ""} /></Field>
+          <Field label="Chính sách đào tạo"><Input name="policyName" defaultValue={item.policyName || ""} placeholder="CME 120 tiết / 5 năm" /></Field>
+          <Field label="Ghi chú"><Input name="note" defaultValue={item.note} /></Field>
+          <Field label="Số tiết yêu cầu"><Input name="requiredHours" type="number" min={0} defaultValue={item.requiredHours || ""} /></Field>
+          <Field label="Tối thiểu mỗi năm"><Input name="annualMinimumHours" type="number" min={0} defaultValue={item.annualMinimumHours || ""} /></Field>
+          <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input name="requiresLicense" type="checkbox" defaultChecked={item.requiresLicense ?? true} className="h-4 w-4 accent-teal-600" />
+            Yêu cầu CCHN
+          </label>
+          <div className="md:col-span-4 flex gap-2">
+            <Button type="submit"><Check className="h-4 w-4" />Lưu</Button>
+            <Button type="button" variant="secondary" onClick={onCancel}><X className="h-4 w-4" />Hủy</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
 }
 
 function AdminToolbar({ children }: { children: React.ReactNode }) {

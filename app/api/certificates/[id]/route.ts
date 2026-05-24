@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { writeAuditLog } from "@/lib/audit";
 import { mapCertificate, toReviewStatus } from "@/lib/api-mappers";
+import { removeCreditRecordsForCertificate, syncApprovedCertificateCredit } from "@/lib/compliance";
 import { permissions } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { requirePermission } from "@/lib/server-permissions";
 import { tenantWhere } from "@/lib/tenant";
+import { certificateCycleAssessment } from "@/lib/training-rules";
 
 const patchSchema = z.object({
   code: z.string().optional().nullable(),
@@ -19,8 +21,11 @@ const patchSchema = z.object({
   issuer: z.string().optional().nullable(),
   issuedDate: z.string().optional().nullable(),
   expiredDate: z.string().optional().nullable(),
+  studyStartDate: z.string().optional().nullable(),
+  studyEndDate: z.string().optional().nullable(),
   hours: z.number().optional(),
   status: z.string().optional().nullable(),
+  includeInCycle: z.boolean().optional(),
   confidence: z.number().optional().nullable(),
   thumbnail: z.string().optional().nullable(),
   fileUrl: z.string().optional().nullable(),
@@ -45,7 +50,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       payload.position === undefined ? before.position : findOrCreatePosition(payload.position),
       payload.type === undefined ? before.certificateType : findOrCreateCertificateType(payload.type)
     ]);
-    const reviewStatus = payload.status ? toReviewStatus(payload.status) : undefined;
+    const activeCycle = await prisma.trainingCycle.findFirst({ where: { ...tenantWhere(actor), isActive: true }, orderBy: { startYear: "desc" } });
+    const issuedDate = payload.issuedDate === undefined ? before.issuedDate?.toISOString().slice(0, 10) : payload.issuedDate;
+    const cycleAssessment = activeCycle
+      ? certificateCycleAssessment({
+          issuedDate,
+          studyEndDate: payload.studyEndDate,
+          hours: payload.hours ?? before.creditHours
+        }, activeCycle)
+      : { includeInCycle: before.includeInCycle };
+    const includeInCycle = payload.includeInCycle ?? cycleAssessment.includeInCycle;
+    const reviewStatus = includeInCycle ? (payload.status ? toReviewStatus(payload.status) : undefined) : "EXCLUDED_FROM_CYCLE";
     const updated = await prisma.certificate.update({
       where: { id },
       data: {
@@ -62,6 +77,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         courseContent: payload.courseContent,
         fileUrl: payload.fileUrl,
         thumbnailUrl: payload.thumbnail || payload.fileUrl || undefined,
+        trainingCycleId: includeInCycle ? activeCycle?.id : null,
+        includeInCycle,
         reviewStatus,
         confidence: payload.confidence,
         rejectionReason: payload.rejectionReason,
@@ -69,8 +86,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       },
       include
     });
+    const creditSync = updated.reviewStatus === "APPROVED"
+      ? await syncApprovedCertificateCredit(updated.id, actor)
+      : await removeCreditRecordsForCertificate(updated.id, actor).then((removed) => ({ synced: false, removed }));
     await writeAuditLog({ actor, action: "certificate.update", entityType: "Certificate", entityId: id, before, after: payload, request });
-    return NextResponse.json({ data: mapCertificate(updated), storage: "database" });
+    return NextResponse.json({ data: mapCertificate(updated), creditSync, storage: "database" });
   } catch (error) {
     if (error instanceof Response) return error;
     return NextResponse.json({ error: "UPDATE_CERTIFICATE_FAILED" }, { status: 400 });

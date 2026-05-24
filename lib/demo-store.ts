@@ -4,6 +4,11 @@ import { certificates as seedCertificates, employees as seedEmployees } from "@/
 
 export type DemoEmployee = (typeof seedEmployees)[number] & {
   avatarUrl?: string;
+  licenseIssuedAt?: string | null;
+  complianceCycleStartDate?: string | null;
+  complianceCycleEndDate?: string | null;
+  policyName?: string | null;
+  annualMinimumHours?: number | null;
 };
 export type DemoCertificate = (typeof seedCertificates)[number] & {
   fileUrl?: string | null;
@@ -22,6 +27,9 @@ export type DemoCertificate = (typeof seedCertificates)[number] & {
   courseContent?: string;
   verificationNumber?: string | null;
   issuePlace?: string | null;
+  includeInCycle?: boolean;
+  cycleCountedHours?: number;
+  cycleReason?: string;
 };
 
 const employeeKey = "cme.demo.employees";
@@ -60,14 +68,36 @@ export function saveCertificates(items: DemoCertificate[]) {
 }
 
 export function getSettings() {
-  return readJson(settingsKey, {
+  const settings = readJson(settingsKey, {
     appName: "Hệ thống Đào tạo Liên tục",
-    requiredHours: 48,
-    cycleStartYear: 2025,
-    cycleEndYear: 2026,
+    requiredHours: 120,
+    cycleStartYear: 2024,
+    cycleEndYear: 2028,
+    cycleRule: "GENERAL_HEALTH_WORKER_5Y",
+    annualMinimumHours: 12,
     ocrProvider: "mock",
     storageProvider: "local"
   });
+  const shouldMigrateLegacyTwoYearDefault =
+    !settings.cycleRule &&
+    settings.cycleStartYear === 2025 &&
+    settings.cycleEndYear === 2026 &&
+    settings.requiredHours === 48;
+  if (shouldMigrateLegacyTwoYearDefault) {
+    return {
+      ...settings,
+      requiredHours: 120,
+      cycleStartYear: 2024,
+      cycleEndYear: 2028,
+      cycleRule: "GENERAL_HEALTH_WORKER_5Y",
+      annualMinimumHours: 12
+    };
+  }
+  return {
+    ...settings,
+    cycleRule: settings.cycleRule ?? (settings.cycleEndYear - settings.cycleStartYear + 1 >= 5 ? "GENERAL_HEALTH_WORKER_5Y" : "LICENSED_PRACTITIONER_2Y"),
+    annualMinimumHours: settings.annualMinimumHours ?? (settings.cycleEndYear - settings.cycleStartYear + 1 >= 5 ? 12 : 0)
+  };
 }
 
 export function saveSettings(settings: ReturnType<typeof getSettings>) {

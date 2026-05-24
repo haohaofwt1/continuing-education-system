@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Columns3, Download, FileUp, Grid2X2, ImageUp, List, Plus, Save, Search, Trash2, UserRound, X } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, Columns3, Download, FileUp, Grid2X2, ImageUp, List, Plus, Save, Search, Trash2, UserRound, X } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { departments, positions } from "@/lib/mock-data";
-import { DemoEmployee, downloadCsv, getEmployees, saveEmployees } from "@/lib/demo-store";
+import { DemoEmployee, downloadCsv } from "@/lib/demo-store";
+import { deleteEmployeeFromApi, saveEmployeeToApi } from "@/lib/api-client";
 
 const statuses = ["Hoạt động", "Thiếu CCHN", "Tạm khóa"];
+const defaultDepartments = ["Phòng khám", "Phòng xét nghiệm", "Phòng Dược"];
+const defaultPositions = ["Bác sĩ", "Dược sĩ", "Điều dưỡng", "Kỹ thuật viên"];
 type ViewMode = "list" | "grid" | "kanban";
 type DeleteTarget = { type: "single"; employee: DemoEmployee } | { type: "bulk"; ids: string[] };
 
@@ -21,10 +23,11 @@ const emptyEmployee: DemoEmployee = {
   username: "",
   email: "",
   phone: "",
-  department: "Phòng khám",
-  position: "Bác sĩ",
+  department: "",
+  position: "",
   role: "Nhân viên",
   licenseNumber: "",
+  licenseIssuedAt: "",
   status: "Hoạt động",
   hours: 0,
   requiredHours: 48,
@@ -32,8 +35,7 @@ const emptyEmployee: DemoEmployee = {
 };
 
 export function EmployeesClient() {
-  const [items, setItems] = useState<DemoEmployee[]>(() => getEmployees());
-  const [storageMode, setStorageMode] = useState<"database" | "demo">("demo");
+  const [items, setItems] = useState<DemoEmployee[]>([]);
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [position, setPosition] = useState("");
@@ -42,33 +44,47 @@ export function EmployeesClient() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [editing, setEditing] = useState<DemoEmployee | null>(null);
   const [notice, setNotice] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const deepLinkHandledRef = useRef(false);
 
   useEffect(() => {
     fetch("/api/employees")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("API unavailable")))
-      .then((payload: { data: DemoEmployee[]; storage?: "database" }) => {
-        setItems(payload.data);
-        saveEmployees(payload.data);
-        setStorageMode(payload.storage === "database" ? "database" : "demo");
+      .then((response) => response.ok ? response.json() : { data: [] })
+      .then((payload: { data: DemoEmployee[] }) => {
+        setItems(Array.isArray(payload.data) ? payload.data : []);
       })
-      .catch(() => setStorageMode("demo"));
+      .catch(() => setItems([]));
   }, []);
 
+  useEffect(() => {
+    if (deepLinkHandledRef.current || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get("edit");
+    const q = params.get("q");
+    if (q && !query) setQuery(q);
+    if (!editId) {
+      deepLinkHandledRef.current = true;
+      return;
+    }
+    const target = items.find((item) => item.id === editId);
+    if (!target) return;
+    setEditing(target);
+    setPage(1);
+    deepLinkHandledRef.current = true;
+  }, [items, query]);
+
   const persist = (next: DemoEmployee[], message: string) => {
-    const previous = items;
     setItems(next);
-    saveEmployees(next);
     setNotice(message);
-    if (storageMode === "database") void syncEmployeeDiff(previous, next);
   };
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return items.filter((employee) => {
+    let result = items.filter((employee) => {
       const haystack = `${employee.name} ${employee.email} ${employee.phone} ${employee.licenseNumber} ${employee.department} ${employee.position}`.toLowerCase();
       return (
         (!normalized || haystack.includes(normalized)) &&
@@ -77,7 +93,27 @@ export function EmployeesClient() {
         (!status || employee.status === status)
       );
     });
-  }, [department, items, position, query, status]);
+
+    if (sortConfig) {
+      result = [...result].sort((a, b) => {
+        const aVal = (a as Record<string, unknown>)[sortConfig.key];
+        const bVal = (b as Record<string, unknown>)[sortConfig.key];
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+          return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+        const aComparable = typeof aVal === "number" ? aVal : String(aVal ?? "");
+        const bComparable = typeof bVal === "number" ? bVal : String(bVal ?? "");
+        if (aComparable < bComparable) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aComparable > bComparable) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [department, items, position, query, status, sortConfig]);
+
+  const departmentOptions = useMemo(() => Array.from(new Set([...defaultDepartments, ...items.map((item) => item.department).filter(Boolean)])).sort((a, b) => a.localeCompare(b)), [items]);
+  const positionOptions = useMemo(() => Array.from(new Set([...defaultPositions, ...items.map((item) => item.position).filter(Boolean)])).sort((a, b) => a.localeCompare(b)), [items]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -110,15 +146,20 @@ export function EmployeesClient() {
       position: String(formData.get("position") ?? ""),
       role: String(formData.get("role") ?? ""),
       licenseNumber: String(formData.get("licenseNumber") ?? ""),
+      licenseIssuedAt: String(formData.get("licenseIssuedAt") ?? ""),
       status: String(formData.get("status") ?? ""),
       hours: Number(formData.get("hours") ?? 0),
       requiredHours: Number(formData.get("requiredHours") ?? 48),
       avatarUrl
     };
     const exists = items.some((item) => item.id === nextEmployee.id);
-    const saved = storageMode === "database" ? await saveEmployeeToApi(nextEmployee, exists) : nextEmployee;
-    persist(exists ? items.map((item) => (item.id === nextEmployee.id ? saved : item)) : [saved, ...items], "Đã lưu hồ sơ nhân sự.");
-    setEditing(null);
+    try {
+      const saved = await saveEmployeeToApi(nextEmployee, exists);
+      persist(exists ? items.map((item) => (item.id === nextEmployee.id ? saved : item)) : [saved, ...items], "Đã lưu hồ sơ nhân sự.");
+      setEditing(null);
+    } catch {
+      setNotice("Chưa lưu được hồ sơ vì hệ thống chưa kết nối được cơ sở dữ liệu. Hãy khởi động PostgreSQL hoặc cấu hình DATABASE_URL trước khi nhập dữ liệu thật.");
+    }
   };
 
   const importFile = async (file: File) => {
@@ -132,14 +173,18 @@ export function EmployeesClient() {
         name: name || `Nhân sự import ${index + 1}`,
         username: email?.split("@")[0] || `import${index + 1}`,
         email: email || `import${index + 1}@example.com`,
-        department: departmentName || "Phòng khám",
-        position: positionName || "Bác sĩ",
+        department: departmentName || "",
+        position: positionName || "",
         licenseNumber: licenseNumber || ""
       };
     });
     if (imported.length) {
-      const saved = storageMode === "database" ? await Promise.all(imported.map((employee) => saveEmployeeToApi(employee, false))) : imported;
-      persist([...saved, ...items], `Đã import ${saved.length} nhân sự.`);
+      try {
+        const saved = await Promise.all(imported.map((employee) => saveEmployeeToApi(employee, false)));
+        persist([...saved, ...items], `Đã import ${saved.length} nhân sự.`);
+      } catch {
+        setNotice("Chưa import được vì hệ thống chưa kết nối được cơ sở dữ liệu. Hãy khởi động PostgreSQL hoặc cấu hình DATABASE_URL trước.");
+      }
     }
   };
 
@@ -147,22 +192,31 @@ export function EmployeesClient() {
 
   const moveToStatus = async (employeeId: string, nextStatus: string) => {
     const target = items.find((item) => item.id === employeeId);
-    if (storageMode === "database" && target) await saveEmployeeToApi({ ...target, status: nextStatus }, true);
+    if (target) await saveEmployeeToApi({ ...target, status: nextStatus }, true);
     persist(items.map((item) => item.id === employeeId ? { ...item, status: nextStatus } : item), `Đã chuyển nhân sự sang "${nextStatus}".`);
   };
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     if (deleteTarget.type === "single") {
-      if (storageMode === "database") await deleteEmployeeFromApi(deleteTarget.employee.id);
+      await deleteEmployeeFromApi(deleteTarget.employee.id);
       persist(items.filter((item) => item.id !== deleteTarget.employee.id), "Đã xóa nhân sự.");
       setSelectedIds((ids) => ids.filter((id) => id !== deleteTarget.employee.id));
     } else {
-      if (storageMode === "database") await Promise.all(deleteTarget.ids.map(deleteEmployeeFromApi));
+      await Promise.all(deleteTarget.ids.map(deleteEmployeeFromApi));
       persist(items.filter((item) => !deleteTarget.ids.includes(item.id)), `Đã xóa ${deleteTarget.ids.length} nhân sự.`);
       setSelectedIds([]);
     }
     setDeleteTarget(null);
+  };
+
+  const bulkUpdateStatus = async (nextStatus: string) => {
+    if (!selectedIds.length) return;
+    const nextItems = items.map((item) => selectedIds.includes(item.id) ? { ...item, status: nextStatus } : item);
+    const selected = items.filter((item) => selectedIds.includes(item.id));
+    await Promise.all(selected.map((item) => saveEmployeeToApi({ ...item, status: nextStatus }, true)));
+    persist(nextItems, `Đã cập nhật trạng thái cho ${selectedIds.length} nhân sự.`);
+    setSelectedIds([]);
   };
 
   return (
@@ -170,7 +224,7 @@ export function EmployeesClient() {
       <PageHeader
         eyebrow="Hồ sơ nhân sự"
         title="Quản lý nhân sự và CCHN"
-        description={`Có list/grid/kanban, tick chọn, bulk action, avatar và xác nhận trước khi xóa. Dữ liệu: ${storageMode === "database" ? "PostgreSQL" : "Demo fallback"}.`}
+        description="Quản lý hồ sơ nhân sự, khoa/phòng, chức danh, CCHN và trạng thái đào tạo liên tục."
         actions={
           <>
             <input
@@ -190,21 +244,31 @@ export function EmployeesClient() {
           </>
         }
       />
+
       {notice ? <div className="mb-4 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">{notice}</div> : null}
 
-      <Card>
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard icon={<UserRound className="h-6 w-6 text-teal-700" />} value={`${items.length}`} label="Tổng nhân sự" />
+        <MetricCard icon={<BarChart3 className="h-6 w-6 text-emerald-700" />} value={`${items.filter(i => i.status === "Hoạt động").length}`} label="Đang hoạt động" />
+        <MetricCard icon={<X className="h-6 w-6 text-amber-700" />} value={`${items.filter(i => !i.licenseNumber).length}`} label="Chưa có CCHN" />
+        <MetricCard icon={<Search className="h-6 w-6 text-sky-700" />} value={`${filtered.length}`} label="Nhân sự đang lọc" />
+      </div>
+
+      <Card className="mt-6">
         <CardContent className="p-5">
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_180px]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_200px_180px_180px]">
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
               <Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} className="pl-9" placeholder="Tìm theo tên, email, số CCHN..." />
             </div>
-            <Select value={department} onChange={(value) => { setDepartment(value); setPage(1); }} options={["", ...departments]} labels={{ "": "Tất cả khoa/phòng" }} />
-            <Select value={position} onChange={(value) => { setPosition(value); setPage(1); }} options={["", ...positions]} labels={{ "": "Tất cả chức danh" }} />
+            <Select value={department} onChange={(value) => { setDepartment(value); setPage(1); }} options={["", ...departmentOptions]} labels={{ "": "Tất cả khoa/phòng" }} />
+            <Select value={position} onChange={(value) => { setPosition(value); setPage(1); }} options={["", ...positionOptions]} labels={{ "": "Tất cả chức danh" }} />
             <Select value={status} onChange={(value) => { setStatus(value); setPage(1); }} options={["", ...statuses]} labels={{ "": "Tất cả trạng thái" }} />
           </div>
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <Button variant="ghost" size="sm" onClick={resetFilters}>Xóa lọc</Button>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="ghost" size="sm" onClick={resetFilters}>Xóa lọc</Button>
+            </div>
             <div className="flex rounded-xl border bg-white p-1">
               <ViewButton active={viewMode === "list"} onClick={() => setViewMode("list")} label="List"><List className="h-4 w-4" /></ViewButton>
               <ViewButton active={viewMode === "grid"} onClick={() => setViewMode("grid")} label="Grid"><Grid2X2 className="h-4 w-4" /></ViewButton>
@@ -217,14 +281,14 @@ export function EmployeesClient() {
       {selectedIds.length ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border bg-white p-3 text-sm shadow-sm">
           <span className="font-semibold text-slate-700">Đã chọn {selectedIds.length}</span>
-          <Button size="sm" variant="secondary" onClick={() => persist(items.map((item) => selectedIds.includes(item.id) ? { ...item, status: "Hoạt động" } : item), `Đã kích hoạt ${selectedIds.length} nhân sự.`)}>Kích hoạt</Button>
-          <Button size="sm" variant="secondary" onClick={() => persist(items.map((item) => selectedIds.includes(item.id) ? { ...item, status: "Tạm khóa" } : item), `Đã tạm khóa ${selectedIds.length} nhân sự.`)}>Tạm khóa</Button>
+          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Hoạt động")}>Kích hoạt</Button>
+          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Tạm khóa")}>Tạm khóa</Button>
           <Button size="sm" variant="destructive" onClick={() => setDeleteTarget({ type: "bulk", ids: selectedIds })}>Xóa</Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Bỏ chọn</Button>
         </div>
       ) : null}
 
-      {editing ? <EmployeeForm employee={editing} onSubmit={submitEmployee} onCancel={() => setEditing(null)} /> : null}
+      {editing ? <EmployeeForm employee={editing} departmentOptions={departmentOptions} positionOptions={positionOptions} onSubmit={submitEmployee} onCancel={() => setEditing(null)} /> : null}
 
       <div className="mt-4 flex items-center justify-between text-sm font-semibold text-slate-600">
         <span>Hiển thị {filtered.length ? pageStart + 1 : 0}-{pageEnd} / {filtered.length} nhân sự</span>
@@ -244,9 +308,18 @@ export function EmployeesClient() {
         <EmployeeList
           employees={paged}
           selectedIds={selectedIds}
+          sortConfig={sortConfig}
+          onSort={(key) => {
+            setSortConfig((prev) => {
+              if (prev?.key === key) {
+                return prev.direction === "asc" ? { key, direction: "desc" } : null;
+              }
+              return { key, direction: "asc" };
+            });
+          }}
           onToggle={(id) => setSelectedIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id])}
           onToggleAll={() => {
-            const pageIds = paged.map((item) => item.id);
+            const pageIds = paged.map((employee) => employee.id);
             const allPageSelected = pageIds.every((id) => selectedIds.includes(id));
             setSelectedIds(allPageSelected ? selectedIds.filter((id) => !pageIds.includes(id)) : Array.from(new Set([...selectedIds, ...pageIds])));
           }}
@@ -323,7 +396,19 @@ export function EmployeesClient() {
   );
 }
 
-function EmployeeForm({ employee, onSubmit, onCancel }: { employee: DemoEmployee; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; onCancel: () => void }) {
+function EmployeeForm({
+  employee,
+  departmentOptions,
+  positionOptions,
+  onSubmit,
+  onCancel
+}: {
+  employee: DemoEmployee;
+  departmentOptions: string[];
+  positionOptions: string[];
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+}) {
   const [selectedPosition, setSelectedPosition] = useState(employee.position);
   const [requiredHours, setRequiredHours] = useState(employee.requiredHours || requiredHoursForPosition(employee.position));
 
@@ -348,7 +433,10 @@ function EmployeeForm({ employee, onSubmit, onCancel }: { employee: DemoEmployee
             <Field label="Email"><Input name="email" defaultValue={employee.email} type="email" required /></Field>
             <Field label="Số điện thoại"><Input name="phone" defaultValue={employee.phone} /></Field>
             <Field label="Khoa/phòng">
-              <select name="department" defaultValue={employee.department} className="h-10 w-full rounded-xl border bg-white px-3 text-sm">{departments.map((item) => <option key={item}>{item}</option>)}</select>
+              <select name="department" defaultValue={employee.department} className="h-10 w-full rounded-xl border bg-white px-3 text-sm">
+                <option value="">Chưa phân khoa/phòng</option>
+                {departmentOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
             </Field>
             <Field label="Chức danh">
               <select
@@ -361,11 +449,13 @@ function EmployeeForm({ employee, onSubmit, onCancel }: { employee: DemoEmployee
                 }}
                 className="h-10 w-full rounded-xl border bg-white px-3 text-sm"
               >
-                {positions.map((item) => <option key={item}>{item}</option>)}
+                <option value="">Chưa chọn chức danh</option>
+                {positionOptions.map((item) => <option key={item}>{item}</option>)}
               </select>
             </Field>
             <Field label="Vai trò hệ thống"><Input name="role" defaultValue={employee.role} /></Field>
             <Field label="Số CCHN"><Input name="licenseNumber" defaultValue={employee.licenseNumber} placeholder="Ví dụ: CCHN-1001" /></Field>
+            <Field label="Ngày cấp CCHN / ngày bắt đầu chu kỳ"><Input name="licenseIssuedAt" type="date" defaultValue={employee.licenseIssuedAt ?? ""} /></Field>
             <Field label="Trạng thái tài khoản">
               <select name="status" defaultValue={employee.status} className="h-10 w-full rounded-xl border bg-white px-3 text-sm">{statuses.map((item) => <option key={item}>{item}</option>)}</select>
             </Field>
@@ -376,11 +466,11 @@ function EmployeeForm({ employee, onSubmit, onCancel }: { employee: DemoEmployee
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Số tiết đã duyệt trong chu kỳ">
                 <Input name="hours" defaultValue={employee.hours || ""} type="number" min={0} placeholder="Tự tính từ chứng chỉ đã duyệt" />
-                <p className="mt-1.5 text-xs leading-5 text-slate-500">Có thể để trống khi thêm mới. Khi có chứng chỉ đã duyệt, hệ thống sẽ cộng tự động; demo hiện cho nhập tay để kiểm thử.</p>
+                <p className="mt-1.5 text-xs leading-5 text-slate-500">Có thể để trống khi thêm mới. Khi có chứng chỉ đã duyệt, hệ thống sẽ cộng tự động theo ngày tín chỉ và chu kỳ cá nhân.</p>
               </Field>
               <Field label="Số tiết yêu cầu theo chức danh">
                 <Input name="requiredHours" value={requiredHours} onChange={(event) => setRequiredHours(Number(event.target.value))} type="number" min={0} />
-                <p className="mt-1.5 text-xs leading-5 text-slate-500">Tự gợi ý theo chức danh: bác sĩ/dược sĩ/điều dưỡng/nữ hộ sinh 48 tiết; kỹ thuật viên/y sĩ 36 tiết. Admin có thể chỉnh nếu đơn vị có quy định khác.</p>
+                <p className="mt-1.5 text-xs leading-5 text-slate-500">Tự gợi ý theo chức danh/policy. Với chu kỳ 5 năm có thể dùng 120 tiết và tối thiểu 12 tiết mỗi năm.</p>
               </Field>
             </div>
           </div>
@@ -395,8 +485,39 @@ function EmployeeForm({ employee, onSubmit, onCancel }: { employee: DemoEmployee
   );
 }
 
-function EmployeeList({ employees, selectedIds, onToggle, onToggleAll, onEdit, onDelete }: { employees: DemoEmployee[]; selectedIds: string[]; onToggle: (id: string) => void; onToggleAll: () => void; onEdit: (employee: DemoEmployee) => void; onDelete: (employee: DemoEmployee) => void }) {
+function EmployeeList({ 
+  employees, 
+  selectedIds, 
+  sortConfig,
+  onSort,
+  onToggle, 
+  onToggleAll, 
+  onEdit, 
+  onDelete 
+}: { 
+  employees: DemoEmployee[]; 
+  selectedIds: string[]; 
+  sortConfig: { key: string; direction: 'asc' | 'desc' } | null;
+  onSort: (key: string) => void;
+  onToggle: (id: string) => void; 
+  onToggleAll: () => void; 
+  onEdit: (employee: DemoEmployee) => void; 
+  onDelete: (employee: DemoEmployee) => void 
+}) {
   const allChecked = employees.length > 0 && employees.every((employee) => selectedIds.includes(employee.id));
+  
+  const SortHeader = ({ label, sortKey }: { label: string, sortKey: string }) => (
+    <th 
+      className="cursor-pointer px-4 py-4 transition hover:text-teal-700"
+      onClick={() => onSort(sortKey)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        <BarChart3 className={`h-3 w-3 transition ${sortConfig?.key === sortKey ? (sortConfig.direction === 'asc' ? 'text-teal-600' : 'rotate-180 text-teal-600') : 'opacity-20'}`} />
+      </div>
+    </th>
+  );
+
   return (
     <Card className="mt-4 overflow-hidden">
       <div className="overflow-x-auto scrollbar-thin">
@@ -404,17 +525,27 @@ function EmployeeList({ employees, selectedIds, onToggle, onToggleAll, onEdit, o
           <thead className="sticky top-0 z-10 bg-teal-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-5 py-4"><input type="checkbox" checked={allChecked} onChange={onToggleAll} className="h-4 w-4 rounded accent-teal-600" aria-label="Chọn tất cả" /></th>
-              <th>Nhân sự</th><th>Khoa/phòng</th><th>Chức danh</th><th>Vai trò</th><th>Số CCHN</th><th>Số tiết</th><th>Trạng thái</th><th className="pr-5">Thao tác</th>
+              <SortHeader label="Nhân sự" sortKey="name" />
+              <SortHeader label="Khoa/phòng" sortKey="department" />
+              <SortHeader label="Chức danh" sortKey="position" />
+              <SortHeader label="Vai trò" sortKey="role" />
+              <SortHeader label="Số CCHN" sortKey="licenseNumber" />
+              <SortHeader label="Số tiết" sortKey="hours" />
+              <SortHeader label="Trạng thái" sortKey="status" />
+              <th className="pr-5">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y bg-white">
             {employees.map((employee) => (
               <tr key={employee.id} className="hover:bg-teal-50/40">
                 <td className="px-5 py-4"><input type="checkbox" checked={selectedIds.includes(employee.id)} onChange={() => onToggle(employee.id)} className="h-4 w-4 rounded accent-teal-600" aria-label={`Chọn ${employee.name}`} /></td>
-                <td className="py-4"><div className="flex items-center gap-3"><Avatar employee={employee} /><div><div className="font-semibold text-slate-950">{employee.name}</div><div className="text-xs text-slate-500">{employee.email} · {employee.phone}</div></div></div></td>
-                <td>{employee.department}</td><td>{employee.position}</td><td>{employee.role}</td><td>{employee.licenseNumber || "Chưa cập nhật"}</td>
-                <td><div className="font-semibold">{employee.hours}/{employee.requiredHours}</div><div className="mt-1 h-2 w-24 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-teal-600" style={{ width: `${Math.min((employee.hours / employee.requiredHours) * 100, 100)}%` }} /></div></td>
-                <td><StatusBadge status={employee.status} /></td>
+                <td className="py-4 px-4"><div className="flex items-center gap-3"><Avatar employee={employee} /><div><div className="font-semibold text-slate-950">{employee.name}</div><div className="text-xs text-slate-500">{employee.email} · {employee.phone}</div></div></div></td>
+                <td className="px-4">{employee.department}</td>
+                <td className="px-4">{employee.position}</td>
+                <td className="px-4">{employee.role}</td>
+                <td className="px-4">{employee.licenseNumber || "Chưa cập nhật"}</td>
+                <td className="px-4"><div className="font-semibold">{employee.hours}/{employee.requiredHours}</div><div className="mt-1 h-2 w-24 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-teal-600" style={{ width: `${Math.min((employee.hours / employee.requiredHours) * 100, 100)}%` }} /></div></td>
+                <td className="px-4"><StatusBadge status={employee.status} /></td>
                 <td className="pr-5"><div className="flex gap-1"><Button asChild variant="ghost" size="sm"><Link href={`/employees/${employee.id}`}>Chi tiết</Link></Button><Button variant="ghost" size="sm" onClick={() => onEdit(employee)}>Sửa</Button><Button variant="ghost" size="icon" onClick={() => onDelete(employee)} aria-label="Xóa"><Trash2 className="h-4 w-4" /></Button></div></td>
               </tr>
             ))}
@@ -423,6 +554,10 @@ function EmployeeList({ employees, selectedIds, onToggle, onToggleAll, onEdit, o
       </div>
     </Card>
   );
+}
+
+function MetricCard({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
+  return <Card><CardContent className="p-5">{icon}<div className="mt-3 text-2xl font-bold">{value}</div><p className="text-sm text-slate-500">{label}</p></CardContent></Card>;
 }
 
 function EmployeeCard({ employee, onEdit, onDelete }: { employee: DemoEmployee; onEdit: () => void; onDelete: () => void }) {
@@ -466,7 +601,7 @@ function DeleteEmployeeDialog({ target, employees, onCancel, onConfirm }: { targ
         <div className="border-b p-5">
           <div className="flex items-start gap-4">
             <div className="flex h-11 w-11 flex-none items-center justify-center rounded-2xl bg-red-50 text-red-600"><Trash2 className="h-5 w-5" /></div>
-            <div><h2 className="text-lg font-bold text-slate-950">{target.type === "single" ? "Xóa nhân sự này?" : `Xóa ${selectedEmployees.length} nhân sự đã chọn?`}</h2><p className="mt-1 text-sm leading-6 text-slate-600">Thao tác này sẽ xóa hồ sơ nhân sự trong demo mode. Với dữ liệu thật nên cân nhắc tạm khóa tài khoản thay vì xóa.</p></div>
+            <div><h2 className="text-lg font-bold text-slate-950">{target.type === "single" ? "Xóa nhân sự này?" : `Xóa ${selectedEmployees.length} nhân sự đã chọn?`}</h2><p className="mt-1 text-sm leading-6 text-slate-600">Thao tác này sẽ xóa hồ sơ nhân sự khỏi hệ thống. Nên tạm khóa tài khoản nếu cần giữ lịch sử vận hành.</p></div>
           </div>
         </div>
         <div className="space-y-3 p-5">
@@ -487,7 +622,7 @@ function DeleteEmployeeDialog({ target, employees, onCancel, onConfirm }: { targ
 function Avatar({ employee, size = "md" }: { employee: DemoEmployee; size?: "md" | "lg" }) {
   const className = size === "lg" ? "h-16 w-16" : "h-10 w-10";
   return employee.avatarUrl ? (
-    // eslint-disable-next-line @next/next/no-img-element -- Avatar can be a local data URL in demo mode.
+    // eslint-disable-next-line @next/next/no-img-element -- Avatar can be a generated object/data URL before upload storage is configured.
     <img src={employee.avatarUrl} alt={employee.name} className={`${className} rounded-2xl border object-cover`} />
   ) : (
     <div className={`${className} flex items-center justify-center rounded-2xl bg-teal-100 text-teal-700`}><UserRound className={size === "lg" ? "h-8 w-8" : "h-5 w-5"} /></div>
@@ -556,32 +691,4 @@ function fileToDataUrl(file: File) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
-}
-
-async function saveEmployeeToApi(employee: DemoEmployee, exists: boolean) {
-  const response = await fetch(exists ? `/api/employees/${employee.id}` : "/api/employees", {
-    method: exists ? "PATCH" : "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(employee)
-  });
-  if (!response.ok) throw new Error("EMPLOYEE_API_SAVE_FAILED");
-  const payload = (await response.json()) as { data: DemoEmployee };
-  return payload.data;
-}
-
-async function deleteEmployeeFromApi(id: string) {
-  const response = await fetch(`/api/employees/${id}`, { method: "DELETE" });
-  if (!response.ok) throw new Error("EMPLOYEE_API_DELETE_FAILED");
-}
-
-async function syncEmployeeDiff(previous: DemoEmployee[], next: DemoEmployee[]) {
-  const previousById = new Map(previous.map((employee) => [employee.id, employee]));
-  const nextById = new Map(next.map((employee) => [employee.id, employee]));
-  const changed = next.filter((employee) => JSON.stringify(previousById.get(employee.id)) !== JSON.stringify(employee));
-  const removed = previous.filter((employee) => !nextById.has(employee.id));
-
-  await Promise.allSettled([
-    ...changed.map((employee) => saveEmployeeToApi(employee, previousById.has(employee.id))),
-    ...removed.map((employee) => deleteEmployeeFromApi(employee.id))
-  ]);
 }

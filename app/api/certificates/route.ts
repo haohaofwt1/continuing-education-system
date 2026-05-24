@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { writeAuditLog } from "@/lib/audit";
 import { mapCertificate, toReviewStatus } from "@/lib/api-mappers";
+import { syncApprovedCertificateCredit } from "@/lib/compliance";
 import { enqueueCertificateOcr } from "@/lib/ocr-jobs";
 import { permissions } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { requirePermission } from "@/lib/server-permissions";
 import { tenantData, tenantWhere } from "@/lib/tenant";
+import { certificateCycleAssessment } from "@/lib/training-rules";
 
 const certificateSchema = z.object({
   id: z.string().optional(),
@@ -21,8 +23,11 @@ const certificateSchema = z.object({
   issuer: z.string().optional().nullable(),
   issuedDate: z.string().optional().nullable(),
   expiredDate: z.string().optional().nullable(),
+  studyStartDate: z.string().optional().nullable(),
+  studyEndDate: z.string().optional().nullable(),
   hours: z.number().optional().default(0),
   status: z.string().optional().nullable(),
+  includeInCycle: z.boolean().optional(),
   confidence: z.number().optional().nullable(),
   thumbnail: z.string().optional().nullable(),
   fileUrl: z.string().optional().nullable(),
@@ -79,10 +84,11 @@ export async function POST(request: Request) {
     const actor = await requirePermission(permissions.createCertificate);
     const payload = certificateSchema.parse(await request.json());
     const certificate = await upsertCertificate(payload, actor);
+    const creditSync = certificate.reviewStatus === "APPROVED" ? await syncApprovedCertificateCredit(certificate.id, actor) : null;
     const shouldQueueOcr = !payload.confidence && (payload.fileUrl || payload.thumbnail);
     const ocrJob = shouldQueueOcr ? await enqueueCertificateOcr(certificate) : null;
     await writeAuditLog({ actor, action: "certificate.create", entityType: "Certificate", entityId: certificate.id, after: payload, request });
-    return NextResponse.json({ data: mapCertificate(certificate), ocrJobId: ocrJob?.id, storage: "database" }, { status: 201 });
+    return NextResponse.json({ data: mapCertificate(certificate), ocrJobId: ocrJob?.id, creditSync, storage: "database" }, { status: 201 });
   } catch (error) {
     if (error instanceof Response) return error;
     return NextResponse.json({ error: "CREATE_CERTIFICATE_FAILED" }, { status: 400 });
@@ -95,9 +101,18 @@ async function upsertCertificate(payload: z.infer<typeof certificateSchema>, act
     findOrCreateDepartment(payload.department),
     findOrCreatePosition(payload.position),
     findOrCreateCertificateType(payload.type),
-    prisma.trainingCycle.findFirst({ where: { isActive: true }, orderBy: { startYear: "desc" } })
+    prisma.trainingCycle.findFirst({ where: { ...tenantWhere(actor), isActive: true }, orderBy: { startYear: "desc" } })
   ]);
   const certificateCode = payload.certificateNumber || payload.code || undefined;
+  const cycleAssessment = trainingCycle
+    ? certificateCycleAssessment({
+        issuedDate: payload.issuedDate,
+        studyEndDate: payload.studyEndDate,
+        hours: payload.hours
+      }, trainingCycle)
+    : { includeInCycle: true };
+  const includeInCycle = payload.includeInCycle ?? cycleAssessment.includeInCycle;
+  const reviewStatus = includeInCycle ? toReviewStatus(payload.status || undefined) : "EXCLUDED_FROM_CYCLE" as const;
   const data = {
     ...tenantData(actor),
     title: payload.title,
@@ -105,7 +120,7 @@ async function upsertCertificate(payload: z.infer<typeof certificateSchema>, act
     departmentId: department?.id ?? holder?.departmentId ?? undefined,
     positionId: position?.id ?? holder?.positionId ?? undefined,
     certificateTypeId: certificateType?.id,
-    trainingCycleId: trainingCycle?.id,
+    trainingCycleId: includeInCycle ? trainingCycle?.id : null,
     issuingOrganization: payload.issuer || null,
     issuedDate: parseDate(payload.issuedDate),
     expiredDate: parseDate(payload.expiredDate),
@@ -114,9 +129,10 @@ async function upsertCertificate(payload: z.infer<typeof certificateSchema>, act
     courseContent: payload.courseContent || null,
     fileUrl: payload.fileUrl || null,
     thumbnailUrl: payload.thumbnail || payload.fileUrl || "/placeholder-certificate.svg",
-    reviewStatus: toReviewStatus(payload.status || undefined),
+    reviewStatus,
     ocrStatus: payload.confidence ? "SUCCEEDED" as const : "QUEUED" as const,
-    confidence: payload.confidence ?? null
+    confidence: payload.confidence ?? null,
+    includeInCycle
   };
 
   if (payload.id) {

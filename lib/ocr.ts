@@ -85,6 +85,24 @@ PHO GIAM DOC
 PGS.TS. Nguyen Thanh Xuan`;
   }
 
+  if (isPasteurNhanSample(fileUrl)) {
+    return `MOCK OCR TEXT - SAMPLE z7860039634064_194991c1686c1aaa1459667e45c81082.jpg
+BO Y TE
+VIEN PASTEUR NHA TRANG
+So: 162-2025/B65
+GIAY CHUNG NHAN DAO TAO LIEN TUC
+Chung nhan ong/ba: PHAM HUU NHAN
+Sinh ngay: 01/01/1966
+Don vi cong tac/Dia chi: Trung tam Y te Phu Xuan
+Da thuc hien dao tao lien tuc theo hinh thuc tham du lop tap huan:
+QUAN LY CHAT LUONG PHONG XET NGHIEM - CHUYEN DE DANH GIA NOI BO
+Tuong duong tong so: 24 tiet hoc
+Tu ngay 08 thang 7 nam 2025 den ngay 10 thang 7 nam 2025
+Khanh Hoa, ngay 10 thang 7 nam 2025
+VIEN TRUONG
+TS.BS. Do Thai Hang`;
+  }
+
   return `MOCK OCR TEXT
 Certificate file: ${fileUrl}
 OCR provider hien tai la mock nen khong doc that pixel anh.
@@ -164,6 +182,30 @@ export async function extractCertificateData(rawText: string, imageUrl?: string)
     };
   }
 
+  if (isPasteurNhanSample(`${imageUrl ?? ""} ${rawText}`)) {
+    return {
+      certificateNumber: "162-2025/B65",
+      certificateTitle: "Giấy chứng nhận đào tạo liên tục",
+      holderName: "Phạm Hữu Nhân",
+      holderBirthDate: "1966-01-01",
+      holderAddress: "Trung tâm Y tế Phú Xuân",
+      issuedDate: "2025-07-10",
+      expiredDate: null,
+      studyStartDate: "2025-07-08",
+      studyEndDate: "2025-07-10",
+      creditHours: 24,
+      equivalentCredits: 24,
+      issuingOrganization: "Viện Pasteur Nha Trang",
+      responsibleUnit: "Viện Pasteur Nha Trang",
+      certificateType: "Đào tạo liên tục",
+      learningFormat: "Tham dự lớp tập huấn",
+      courseContent: "Quản lý chất lượng phòng xét nghiệm - chuyên đề đánh giá nội bộ",
+      verificationNumber: "162-2025/B65",
+      issuePlace: "Khánh Hòa",
+      confidence: 0.82
+    };
+  }
+
   return {
     certificateNumber: null,
     certificateTitle: "Chưa đọc được tiêu đề chứng chỉ",
@@ -209,6 +251,16 @@ function isThuongSample(value: string) {
 function isTrangSample(value: string) {
   const normalized = value.toLowerCase();
   return normalized.includes("ntttrang") || normalized.includes("nguyen thi thuy trang") || normalized.includes("nguyễn thị thùy trang");
+}
+
+function isPasteurNhanSample(value: string) {
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("z7860039634064") ||
+    normalized.includes("pham huu nhan") ||
+    normalized.includes("phạm hữu nhân") ||
+    normalized.includes("pasteur nha trang")
+  );
 }
 
 export async function matchEmployeeByName(holderName: string) {

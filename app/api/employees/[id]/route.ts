@@ -15,6 +15,7 @@ const patchSchema = z.object({
   position: z.string().optional().nullable(),
   role: z.string().optional().nullable(),
   licenseNumber: z.string().optional().nullable(),
+  licenseIssuedAt: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
   hours: z.number().optional(),
   requiredHours: z.number().optional(),
@@ -44,6 +45,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         phone: payload.phone,
         avatarUrl: payload.avatarUrl,
         licenseNumber: payload.licenseNumber,
+        licenseIssuedAt: payload.licenseIssuedAt === undefined ? undefined : parseDate(payload.licenseIssuedAt),
         status: payload.status ? toAccountStatus(payload.status) : undefined,
         departmentId: department?.id,
         positionId: position?.id,
@@ -76,6 +78,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (error instanceof Response) return error;
     return NextResponse.json({ error: "UPDATE_EMPLOYEE_FAILED" }, { status: 400 });
   }
+}
+
+function parseDate(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {

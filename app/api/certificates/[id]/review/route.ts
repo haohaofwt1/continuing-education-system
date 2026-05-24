@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { writeAuditLog } from "@/lib/audit";
 import { transitionCertificateReview } from "@/lib/certificate-workflow";
+import { syncApprovedCertificateCredit } from "@/lib/compliance";
 import { permissions } from "@/lib/permissions";
 import { rateLimit } from "@/lib/rate-limit";
 import { requirePermission } from "@/lib/server-permissions";
@@ -27,6 +28,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       note: payload.note,
       data: { rejectionReason: payload.rejectionReason }
     });
+    const creditSync = payload.status === "APPROVED" || payload.status === "EXCLUDED_FROM_CYCLE"
+      ? await syncApprovedCertificateCredit(id, actor)
+      : null;
 
     await writeAuditLog({
       actor,
@@ -38,7 +42,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       request
     });
 
-    return NextResponse.json({ data: updated });
+    return NextResponse.json({ data: updated, creditSync });
   } catch (error) {
     if (error instanceof Response) return error;
     return NextResponse.json({ error: error instanceof Error ? error.message : "REVIEW_CERTIFICATE_FAILED" }, { status: 400 });

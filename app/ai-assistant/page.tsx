@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Bot, Send, Sparkles, UserRound } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getCertificates, getEmployees } from "@/lib/demo-store";
+import { getCertificates, getEmployees, type DemoCertificate, type DemoEmployee } from "@/lib/demo-store";
 
 const suggestions = [
   "Ai đang thiếu số tiết trong năm 2026?",
@@ -33,6 +33,26 @@ export default function AiAssistantPage() {
   ]);
   const [loading, setLoading] = useState(false);
   const [debugAction, setDebugAction] = useState<object | null>(null);
+  const [dbData, setDbData] = useState<{ employees: DemoEmployee[]; certificates: DemoCertificate[] } | null>(null);
+
+  React.useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [empRes, certRes] = await Promise.all([
+          fetch("/api/employees"),
+          fetch("/api/certificates")
+        ]);
+        const emp: { data: DemoEmployee[]; storage?: string } = await empRes.json();
+        const cert: { data: DemoCertificate[]; storage?: string } = await certRes.json();
+        if (emp.storage === "database" || cert.storage === "database") {
+          setDbData({ employees: emp.data, certificates: cert.data });
+        }
+      } catch {
+        // Fallback handled by using dbData || getEmployees()
+      }
+    };
+    void fetchData();
+  }, []);
 
   const submitQuestion = async (value: string) => {
     const trimmed = value.trim();
@@ -43,16 +63,17 @@ export default function AiAssistantPage() {
     setLoading(true);
 
     try {
+      const context = dbData || {
+        employees: getEmployees(),
+        certificates: getCertificates()
+      };
       const response = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: trimmed,
           mode: "chat",
-          context: {
-            employees: getEmployees(),
-            certificates: getCertificates()
-          }
+          context
         })
       });
       const data = await response.json();

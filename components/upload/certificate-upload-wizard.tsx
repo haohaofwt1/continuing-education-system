@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Camera, CheckCircle2, FileUp, Loader2, RotateCcw, RotateCw, ScanText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { DemoCertificate } from "@/lib/demo-store";
+import { getSettings, type DemoCertificate } from "@/lib/demo-store";
+import { certificateCycleAssessment, cycleEndDate, cycleStartDate } from "@/lib/training-rules";
 
 type Step = 1 | 2 | 3;
 type UploadedFile = {
@@ -47,6 +48,42 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
   const [preview, setPreview] = useState("/placeholder-certificate.svg");
   const [rotation, setRotation] = useState(0);
   const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
+  const [activeCycle, setActiveCycle] = useState(() => {
+    const settings = getSettings();
+    return {
+      startYear: settings.cycleStartYear,
+      endYear: settings.cycleEndYear,
+      requiredHours: settings.requiredHours
+    };
+  });
+
+  useEffect(() => {
+    fetch("/api/training/cycles")
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("cycle unavailable")))
+      .then((payload: { data?: { startYear: number; endYear: number; requiredHours?: number } | null }) => {
+        if (payload.data) {
+          setActiveCycle({
+            startYear: payload.data.startYear,
+            endYear: payload.data.endYear,
+            requiredHours: payload.data.requiredHours ?? 48
+          });
+        }
+      })
+      .catch(() => {
+        const settings = getSettings();
+        setActiveCycle({
+          startYear: settings.cycleStartYear,
+          endYear: settings.cycleEndYear,
+          requiredHours: settings.requiredHours
+        });
+      });
+  }, []);
+
+  const cycleAssessment = useMemo(() => certificateCycleAssessment({
+    issuedDate: extracted.issuedDate,
+    studyEndDate: extracted.studyEndDate,
+    hours: extracted.creditHours
+  }, activeCycle), [activeCycle, extracted.creditHours, extracted.issuedDate, extracted.studyEndDate]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setStep(2);
@@ -150,6 +187,11 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
               <div className="mt-3 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
                 Confidence score: {Math.round(extracted.confidence * 100)}%
               </div>
+              <div className={`mt-3 rounded-2xl border p-4 text-sm leading-6 ${cycleAssessment.includeInCycle ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                <div className="font-semibold">{cycleAssessment.statusLabel}: {cycleAssessment.countedHours}/{extracted.creditHours || 0} tiết được cộng</div>
+                <div>{cycleAssessment.reason}</div>
+                <div className="text-xs">Chu kỳ hiện tại: {cycleStartDate(activeCycle)} đến {cycleEndDate(activeCycle)}.</div>
+              </div>
               <div className="mt-3 rounded-2xl border bg-white p-3 text-xs leading-5 text-slate-600">
                 File đang lưu: <span className="font-semibold text-slate-900">{uploadedFile?.url ?? "Chưa có file lưu trên server"}</span>
               </div>
@@ -163,6 +205,8 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
               onSubmit={(event) => {
                 event.preventDefault();
                 const formData = new FormData(event.currentTarget);
+                const action = String(formData.get("action"));
+                const includeInCycle = cycleAssessment.includeInCycle;
                 const certificate: DemoCertificate = {
                   id: `c${Date.now()}`,
                   code: String(formData.get("certificateNumber") ?? "") || `CERT-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`,
@@ -175,8 +219,8 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                   issuedDate: String(formData.get("issuedDate") ?? ""),
                   expiredDate: String(formData.get("expiredDate") ?? "") || null,
                   hours: Number(formData.get("hours") ?? 0),
-                  status: String(formData.get("action")) === "approve" ? "Đã duyệt" : "Chờ duyệt",
-                  tone: String(formData.get("action")) === "approve" ? "green" : "yellow",
+                  status: includeInCycle ? (action === "approve" ? "Đã duyệt" : "Chờ duyệt") : "Không tính chu kỳ",
+                  tone: includeInCycle ? (action === "approve" ? "green" : "yellow") : "gray",
                   ocrStatus: "Đã đọc",
                   confidence: extracted.confidence,
                   thumbnail: uploadedFile?.thumbnailUrl || uploadedFile?.url || preview,
@@ -195,7 +239,10 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                   learningFormat: String(formData.get("learningFormat") ?? ""),
                   courseContent: String(formData.get("courseContent") ?? ""),
                   verificationNumber: String(formData.get("verificationNumber") ?? ""),
-                  issuePlace: String(formData.get("issuePlace") ?? "")
+                  issuePlace: String(formData.get("issuePlace") ?? ""),
+                  includeInCycle,
+                  cycleCountedHours: includeInCycle ? Number(formData.get("hours") ?? 0) : 0,
+                  cycleReason: cycleAssessment.reason
                 };
                 onCreate?.(certificate);
                 setPreview("/placeholder-certificate.svg");
@@ -252,6 +299,10 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                   <Field label="Số tiết">
                     <Input name="hours" defaultValue={String(extracted.creditHours)} type="number" />
                   </Field>
+                  <div className="rounded-xl border bg-slate-50 p-3 text-sm leading-6 sm:col-span-2">
+                    <div className="font-semibold text-slate-900">Số tiết tính chu kỳ: {cycleAssessment.countedHours} tiết</div>
+                    <div className="text-slate-600">Chứng chỉ ngoài chu kỳ vẫn lưu nguyên số tiết gốc để tra cứu, nhưng không cộng vào tiến độ hiện tại.</div>
+                  </div>
                   <Field label="Quy đổi giờ tín chỉ">
                     <Input name="equivalentCredits" defaultValue={String(extracted.equivalentCredits ?? "")} type="number" />
                   </Field>

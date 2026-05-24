@@ -1,5 +1,6 @@
 import type { CertificateReviewStatus, User, Certificate, Department, Position, Role, CertificateType } from "@prisma/client";
 import type { StatusTone } from "@/lib/mock-data";
+import { certificateCycleAssessment } from "@/lib/training-rules";
 
 type EmployeeRecord = User & {
   department: Department | null;
@@ -57,6 +58,7 @@ export function mapEmployee(record: EmployeeRecord) {
     position: record.position?.name ?? "",
     role: record.role?.name ?? "Nhân viên",
     licenseNumber: record.licenseNumber ?? "",
+    licenseIssuedAt: formatDate(record.licenseIssuedAt),
     status: record.status === "LOCKED" ? "Tạm khóa" : record.licenseNumber ? "Hoạt động" : "Thiếu CCHN",
     hours: summary?.approvedHours ?? 0,
     requiredHours: summary?.requiredHours ?? record.position?.requiredHours ?? 48,
@@ -66,6 +68,9 @@ export function mapEmployee(record: EmployeeRecord) {
 
 export function mapCertificate(record: CertificateRecord) {
   const status = reviewStatusToLabel[record.reviewStatus] ?? "Chờ duyệt";
+  const cycleAssessment = record.trainingCycleId
+    ? { countedHours: record.includeInCycle ? record.creditHours : 0, reason: "Được gán vào chu kỳ đào tạo hiện tại." }
+    : certificateCycleAssessment({ issuedDate: formatDate(record.issuedDate), hours: record.creditHours }, { startYear: new Date().getFullYear(), endYear: new Date().getFullYear() });
   return {
     id: record.id,
     code: record.certificateCode ?? record.id,
@@ -98,7 +103,10 @@ export function mapCertificate(record: CertificateRecord) {
     learningFormat: "",
     courseContent: record.courseContent ?? "",
     verificationNumber: record.certificateCode,
-    issuePlace: ""
+    issuePlace: "",
+    includeInCycle: record.includeInCycle,
+    cycleCountedHours: record.includeInCycle ? record.creditHours : 0,
+    cycleReason: record.includeInCycle ? cycleAssessment.reason : "Không cộng vào chu kỳ hiện tại."
   };
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Columns3, Download, Edit3, Eye, Filter, Grid2X2, ImageUp, List, Plus, RotateCcw, RotateCw, Save, Search, SlidersHorizontal, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { BarChart3, CalendarClock, Check, ChevronLeft, ChevronRight, Columns3, Download, Edit3, Eye, FileSpreadsheet, Filter, Grid2X2, ImageUp, List, Plus, RotateCcw, RotateCw, Save, Search, SlidersHorizontal, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { CertificateCard } from "@/components/certificates/certificate-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -9,12 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CertificateUploadWizard } from "@/components/upload/certificate-upload-wizard";
-import { DemoCertificate, downloadCsv, getCertificates, saveCertificates } from "@/lib/demo-store";
-import { departments } from "@/lib/mock-data";
+import { DemoCertificate, downloadCsv } from "@/lib/demo-store";
+import { deleteCertificateFromApi, saveCertificateToApi } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
 
-const quickFilters = ["Chờ duyệt", "Đã duyệt", "Thiếu thông tin", "Sắp hết hạn", "Đã hết hạn", "Nghi trùng", "Không có ảnh"];
-const kanbanColumns = ["Chờ duyệt", "Đã duyệt", "Thiếu thông tin", "Sắp hết hạn", "Đã hết hạn"];
+const quickFilters = ["Chờ duyệt", "Đã duyệt", "Thiếu thông tin", "Sắp hết hạn", "Đã hết hạn", "Nghi trùng", "Không tính chu kỳ", "Không có ảnh"];
+const kanbanColumns = ["Chờ duyệt", "Đã duyệt", "Thiếu thông tin", "Sắp hết hạn", "Đã hết hạn", "Không tính chu kỳ"];
 type ViewMode = "grid" | "list" | "kanban";
 type DrawerMode = "view" | "edit";
 type DateField = "issuedDate" | "studyStartDate" | "expiredDate";
@@ -24,8 +24,7 @@ type DeleteTarget =
   | { type: "bulk"; ids: string[] };
 
 export function CertificatesClient() {
-  const [items, setItems] = useState<DemoCertificate[]>(() => getCertificates());
-  const [storageMode, setStorageMode] = useState<"database" | "demo">("demo");
+  const [items, setItems] = useState<DemoCertificate[]>([]);
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [type, setType] = useState("");
@@ -47,6 +46,7 @@ export function CertificatesClient() {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
@@ -54,26 +54,21 @@ export function CertificatesClient() {
 
   useEffect(() => {
     fetch("/api/certificates")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("API unavailable")))
-      .then((payload: { data: DemoCertificate[]; storage?: "database" }) => {
-        setItems(payload.data);
-        saveCertificates(payload.data);
-        setStorageMode(payload.storage === "database" ? "database" : "demo");
+      .then((response) => response.ok ? response.json() : { data: [] })
+      .then((payload: { data: DemoCertificate[] }) => {
+        setItems(Array.isArray(payload.data) ? payload.data : []);
       })
-      .catch(() => setStorageMode("demo"));
+      .catch(() => setItems([]));
   }, []);
 
   const persist = (next: DemoCertificate[], message: string) => {
-    const previous = items;
     setItems(next);
-    saveCertificates(next);
     setNotice(message);
-    if (storageMode === "database") void syncCertificateDiff(previous, next);
   };
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return items.filter((certificate) => {
+    let result = items.filter((certificate) => {
       const haystack = `${certificate.title} ${certificate.holder} ${certificate.code} ${certificate.issuer} ${certificate.courseContent ?? ""}`.toLowerCase();
       return (
         (!normalized || haystack.includes(normalized)) &&
@@ -84,9 +79,27 @@ export function CertificatesClient() {
         (!aiFilter || applyNaturalFilter(certificate, aiFilter))
       );
     });
-  }, [aiFilter, dateField, dateFrom, dateTo, department, items, month, period, quarter, query, status, type, year]);
 
-  const types = Array.from(new Set(items.map((item) => item.type)));
+    if (sortConfig) {
+      result = [...result].sort((a, b) => {
+        const aVal = (a as Record<string, unknown>)[sortConfig.key];
+        const bVal = (b as Record<string, unknown>)[sortConfig.key];
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+          return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+        const aComparable = typeof aVal === "number" ? aVal : String(aVal ?? "");
+        const bComparable = typeof bVal === "number" ? bVal : String(bVal ?? "");
+        if (aComparable < bComparable) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aComparable > bComparable) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [aiFilter, dateField, dateFrom, dateTo, department, items, month, period, quarter, query, status, type, year, sortConfig]);
+
+  const types = Array.from(new Set(items.map((item) => item.type).filter(Boolean)));
+  const departmentOptions = Array.from(new Set(items.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageStart = filtered.length ? (currentPage - 1) * pageSize : 0;
@@ -99,12 +112,12 @@ export function CertificatesClient() {
   };
 
   const approve = async (certificate: DemoCertificate) => {
-    if (storageMode === "database") await saveCertificateToApi({ ...certificate, status: "Đã duyệt", tone: "green" }, true);
+    await saveCertificateToApi({ ...certificate, status: "Đã duyệt", tone: "green" }, true);
     persist(items.map((item) => item.id === certificate.id ? { ...item, status: "Đã duyệt", tone: "green" } : item), "Đã duyệt chứng chỉ.");
   };
 
   const removeNow = async (certificate: DemoCertificate) => {
-    if (storageMode === "database") await deleteCertificateFromApi(certificate.id);
+    await deleteCertificateFromApi(certificate.id);
     persist(items.filter((item) => item.id !== certificate.id), "Đã xóa chứng chỉ.");
     if (selected?.id === certificate.id) setSelected(null);
   };
@@ -146,14 +159,17 @@ export function CertificatesClient() {
       fileMimeType: uploadedFile?.mimeType ?? selected.fileMimeType ?? null,
       fileSizeBytes: uploadedFile?.sizeBytes ?? selected.fileSizeBytes ?? null
     };
-    const saved = storageMode === "database" ? await saveCertificateToApi(next, true) : next;
+    const saved = await saveCertificateToApi(next, true);
     persist(items.map((item) => item.id === selected.id ? saved : item), "Đã cập nhật chứng chỉ.");
     setSelected(null);
   };
 
-  const bulkUpdateStatus = (nextStatus: string) => {
+  const bulkUpdateStatus = async (nextStatus: string) => {
     if (!selectedIds.length) return;
-    persist(items.map((item) => selectedIds.includes(item.id) ? { ...item, status: nextStatus, tone: nextStatus === "Đã duyệt" ? "green" : item.tone } : item), `Đã chuyển ${selectedIds.length} chứng chỉ sang "${nextStatus}".`);
+    const nextTone = nextStatus === "Đã duyệt" ? "green" : nextStatus === "Đã hết hạn" ? "red" : nextStatus === "Thiếu thông tin" ? "gray" : "yellow";
+    const selected = items.filter((item) => selectedIds.includes(item.id));
+    await Promise.all(selected.map((item) => saveCertificateToApi({ ...item, status: nextStatus, tone: nextTone }, true)));
+    persist(items.map((item) => selectedIds.includes(item.id) ? { ...item, status: nextStatus, tone: nextTone } : item), `Đã chuyển ${selectedIds.length} chứng chỉ sang "${nextStatus}".`);
     setSelectedIds([]);
   };
 
@@ -168,7 +184,7 @@ export function CertificatesClient() {
       await removeNow(deleteTarget.certificate);
       setSelectedIds((ids) => ids.filter((id) => id !== deleteTarget.certificate.id));
     } else {
-      if (storageMode === "database") await Promise.all(deleteTarget.ids.map(deleteCertificateFromApi));
+      await Promise.all(deleteTarget.ids.map(deleteCertificateFromApi));
       persist(items.filter((item) => !deleteTarget.ids.includes(item.id)), `Đã xóa ${deleteTarget.ids.length} chứng chỉ.`);
       setSelectedIds([]);
     }
@@ -178,7 +194,7 @@ export function CertificatesClient() {
   const moveToStatus = async (certificateId: string, nextStatus: string) => {
     const target = items.find((item) => item.id === certificateId);
     const nextTone = nextStatus === "Đã duyệt" ? "green" : nextStatus === "Đã hết hạn" ? "red" : nextStatus === "Thiếu thông tin" ? "gray" : "yellow";
-    if (storageMode === "database" && target) await saveCertificateToApi({ ...target, status: nextStatus, tone: nextTone }, true);
+    if (target) await saveCertificateToApi({ ...target, status: nextStatus, tone: nextTone }, true);
     persist(items.map((item) => item.id === certificateId ? { ...item, status: nextStatus, tone: nextTone } : item), `Đã chuyển chứng chỉ sang "${nextStatus}".`);
   };
 
@@ -199,7 +215,7 @@ export function CertificatesClient() {
       <PageHeader
         eyebrow="Quản lý chứng chỉ"
         title="Upload, OCR và duyệt chứng chỉ"
-        description={`Có grid/list/kanban, filter thời gian, zoom ảnh và sửa inline trong drawer. Dữ liệu: ${storageMode === "database" ? "PostgreSQL" : "Demo fallback"}.`}
+        description="Quản lý chứng chỉ, OCR, trạng thái duyệt và số tiết được tính vào chu kỳ đào tạo."
         actions={
           <>
             <div className="relative">
@@ -232,26 +248,33 @@ export function CertificatesClient() {
       {showWizard ? (
         <CertificateUploadWizard
           onCreate={async (certificate) => {
-            const saved = storageMode === "database" ? await saveCertificateToApi(certificate, false) : certificate;
+            const saved = await saveCertificateToApi(certificate, false);
             persist([saved, ...items], "Đã tạo chứng chỉ từ OCR.");
             setShowWizard(false);
           }}
         />
       ) : null}
 
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard icon={<FileSpreadsheet className="h-6 w-6 text-teal-700" />} value={`${items.length}`} label="Tổng chứng chỉ" />
+        <MetricCard icon={<Check className="h-6 w-6 text-emerald-700" />} value={`${items.filter(i => i.status === "Đã duyệt").length}`} label="Đã phê duyệt" />
+        <MetricCard icon={<CalendarClock className="h-6 w-6 text-amber-700" />} value={`${items.filter(i => i.status === "Sắp hết hạn").length}`} label="Sắp hết hạn" />
+        <MetricCard icon={<Search className="h-6 w-6 text-sky-700" />} value={`${filtered.length}`} label="Chứng chỉ đang lọc" />
+      </div>
+
       <Card className="mt-6">
         <CardContent className="p-5">
-          <div className="grid gap-3 xl:grid-cols-[1fr_200px_200px_200px]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_200px_200px_200px]">
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
               <Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} className="pl-9" placeholder="Tìm chứng chỉ, nhân sự, mã, đơn vị cấp, nội dung..." />
             </div>
-            <Select value={department} onChange={(value) => { setDepartment(value); setPage(1); }} options={["", ...departments]} labels={{ "": "Tất cả khoa/phòng" }} />
+            <Select value={department} onChange={(value) => { setDepartment(value); setPage(1); }} options={["", ...departmentOptions]} labels={{ "": "Tất cả khoa/phòng" }} />
             <Select value={type} onChange={(value) => { setType(value); setPage(1); }} options={["", ...types]} labels={{ "": "Tất cả loại" }} />
             <Select value={status} onChange={(value) => { setStatus(value); setPage(1); }} options={["", ...quickFilters]} labels={{ "": "Tất cả trạng thái" }} />
           </div>
 
-          <div className="mt-4 grid gap-3 xl:grid-cols-[180px_160px_1fr]">
+          <div className="mt-4 grid gap-3 lg:grid-cols-[180px_160px_1fr]">
             <Select value={dateField} onChange={(value) => { setDateField(value as DateField); setPage(1); }} options={["issuedDate", "studyStartDate", "expiredDate"]} labels={{ issuedDate: "Theo ngày cấp", studyStartDate: "Theo ngày học", expiredDate: "Theo hết hạn" }} />
             <Select value={period} onChange={(value) => { setPeriod(value as Period); setPage(1); }} options={["all", "today", "month", "quarter", "year", "custom"]} labels={{ all: "Mọi thời gian", today: "Hôm nay", month: "Theo tháng", quarter: "Theo quý", year: "Theo năm", custom: "Tùy chọn" }} />
             <div className="grid gap-3 md:grid-cols-4">
@@ -348,6 +371,15 @@ export function CertificatesClient() {
         <CertificateList
           pageCertificates={paged}
           selectedIds={selectedIds}
+          sortConfig={sortConfig}
+          onSort={(key) => {
+            setSortConfig((prev) => {
+              if (prev?.key === key) {
+                return prev.direction === "asc" ? { key, direction: "desc" } : null;
+              }
+              return { key, direction: "asc" };
+            });
+          }}
           onToggle={(id) => setSelectedIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id])}
           onToggleAll={() => {
             const pageIds = paged.map((item) => item.id);
@@ -511,7 +543,7 @@ function DeleteConfirmDialog({
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-slate-950">{title}</h2>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                Thao tác này sẽ xóa dữ liệu chứng chỉ trong demo mode, bao gồm thông tin OCR, trạng thái duyệt và ảnh đính kèm đã lưu.
+                Thao tác này sẽ xóa dữ liệu chứng chỉ, bao gồm thông tin OCR, trạng thái duyệt và ảnh đính kèm đã lưu.
               </p>
             </div>
           </div>
@@ -664,6 +696,8 @@ function CertificateEditForm({ certificate, onSubmit, onCancel }: { certificate:
 function CertificateList({
   pageCertificates,
   selectedIds,
+  sortConfig,
+  onSort,
   onToggle,
   onToggleAll,
   onView,
@@ -673,6 +707,8 @@ function CertificateList({
 }: {
   pageCertificates: DemoCertificate[];
   selectedIds: string[];
+  sortConfig: { key: string; direction: 'asc' | 'desc' } | null;
+  onSort: (key: string) => void;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
   onView: (item: DemoCertificate) => void;
@@ -681,6 +717,18 @@ function CertificateList({
   onDelete: (item: DemoCertificate) => void;
 }) {
   const allChecked = pageCertificates.length > 0 && pageCertificates.every((certificate) => selectedIds.includes(certificate.id));
+
+  const SortHeader = ({ label, sortKey }: { label: string, sortKey: string }) => (
+    <th 
+      className="cursor-pointer px-4 py-4 transition hover:text-teal-700"
+      onClick={() => onSort(sortKey)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        <BarChart3 className={`h-3 w-3 transition ${sortConfig?.key === sortKey ? (sortConfig.direction === 'asc' ? 'text-teal-600' : 'rotate-180 text-teal-600') : 'opacity-20'}`} />
+      </div>
+    </th>
+  );
 
   return (
     <Card className="mt-4 overflow-hidden">
@@ -691,7 +739,13 @@ function CertificateList({
               <th className="p-4">
                 <input type="checkbox" checked={allChecked} onChange={onToggleAll} aria-label="Chọn tất cả" className="h-4 w-4 rounded border-teal-300 accent-teal-600" />
               </th>
-              <th>Chứng chỉ</th><th>Người được cấp</th><th>Ngày cấp</th><th>Thời gian học</th><th>Số tiết</th><th>Trạng thái</th><th className="pr-4">Thao tác</th>
+              <SortHeader label="Chứng chỉ" sortKey="title" />
+              <SortHeader label="Người được cấp" sortKey="holder" />
+              <SortHeader label="Ngày cấp" sortKey="issuedDate" />
+              <SortHeader label="Thời gian học" sortKey="studyStartDate" />
+              <SortHeader label="Số tiết" sortKey="hours" />
+              <SortHeader label="Trạng thái" sortKey="status" />
+              <th className="pr-4 text-right">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y bg-white">
@@ -700,14 +754,14 @@ function CertificateList({
                 <td className="p-4">
                   <input type="checkbox" checked={selectedIds.includes(certificate.id)} onChange={() => onToggle(certificate.id)} aria-label={`Chọn ${certificate.title}`} className="h-4 w-4 rounded border-teal-300 accent-teal-600" />
                 </td>
-                <td><div className="font-semibold text-slate-950">{certificate.title}</div><div className="text-xs text-slate-500">{certificate.code}</div></td>
-                <td>{certificate.holder}</td>
-                <td>{formatDate(certificate.issuedDate)}</td>
-                <td>{formatDate(certificate.studyStartDate)} - {formatDate(certificate.studyEndDate)}</td>
-                <td className="font-semibold">{certificate.hours}</td>
-                <td><StatusBadge status={certificate.status} /></td>
+                <td className="px-4"><div className="font-semibold text-slate-950">{certificate.title}</div><div className="text-xs text-slate-500">{certificate.code}</div></td>
+                <td className="px-4">{certificate.holder}</td>
+                <td className="px-4">{formatDate(certificate.issuedDate)}</td>
+                <td className="px-4">{formatDate(certificate.studyStartDate)} - {formatDate(certificate.studyEndDate)}</td>
+                <td className="px-4 font-semibold">{certificate.hours}</td>
+                <td className="px-4"><StatusBadge status={certificate.status} /></td>
                 <td className="pr-4">
-                  <div className="flex gap-1">
+                  <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => onView(certificate)}><Eye className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" onClick={() => onEdit(certificate)}><Edit3 className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" onClick={() => onApprove(certificate)}><Check className="h-4 w-4" /></Button>
@@ -721,6 +775,10 @@ function CertificateList({
       </div>
     </Card>
   );
+}
+
+function MetricCard({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
+  return <Card><CardContent className="p-5">{icon}<div className="mt-3 text-2xl font-bold">{value}</div><p className="text-sm text-slate-500">{label}</p></CardContent></Card>;
 }
 
 function PaginationControls({
@@ -795,6 +853,8 @@ function certificateFields(certificate: DemoCertificate): Array<[string, React.R
     ["Ngày cấp", formatDate(certificate.issuedDate)],
     ["Ngày hết hạn", formatDate(certificate.expiredDate)],
     ["Số tiết", certificate.hours],
+    ["Số tiết tính chu kỳ", certificate.includeInCycle === false ? 0 : certificate.cycleCountedHours ?? certificate.hours],
+    ["Ghi chú chu kỳ", certificate.cycleReason || (certificate.includeInCycle === false ? "Không cộng vào chu kỳ hiện tại." : "Được cộng vào chu kỳ hiện tại.")],
     ["Quy đổi tín chỉ", certificate.equivalentCredits ?? "Chưa cập nhật"],
     ["Số chứng thực / quyển số", certificate.verificationNumber || "Chưa cập nhật"],
     ["Mã chứng chỉ", certificate.code],
@@ -852,32 +912,4 @@ async function uploadFileToServer(file: File) {
   const response = await fetch("/api/upload", { method: "POST", body: formData });
   const data = await response.json();
   return data.files?.[0] as { fileName: string; url: string; thumbnailUrl?: string; sizeBytes: number; mimeType: string } | undefined;
-}
-
-async function saveCertificateToApi(certificate: DemoCertificate, exists: boolean) {
-  const response = await fetch(exists ? `/api/certificates/${certificate.id}` : "/api/certificates", {
-    method: exists ? "PATCH" : "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(certificate)
-  });
-  if (!response.ok) throw new Error("CERTIFICATE_API_SAVE_FAILED");
-  const payload = (await response.json()) as { data: DemoCertificate };
-  return payload.data;
-}
-
-async function deleteCertificateFromApi(id: string) {
-  const response = await fetch(`/api/certificates/${id}`, { method: "DELETE" });
-  if (!response.ok) throw new Error("CERTIFICATE_API_DELETE_FAILED");
-}
-
-async function syncCertificateDiff(previous: DemoCertificate[], next: DemoCertificate[]) {
-  const previousById = new Map(previous.map((certificate) => [certificate.id, certificate]));
-  const nextById = new Map(next.map((certificate) => [certificate.id, certificate]));
-  const changed = next.filter((certificate) => JSON.stringify(previousById.get(certificate.id)) !== JSON.stringify(certificate));
-  const removed = previous.filter((certificate) => !nextById.has(certificate.id));
-
-  await Promise.allSettled([
-    ...changed.map((certificate) => saveCertificateToApi(certificate, previousById.has(certificate.id))),
-    ...removed.map((certificate) => deleteCertificateFromApi(certificate.id))
-  ]);
 }

@@ -42,6 +42,28 @@ For the AI-first product roadmap, see [AI-Native Commercialization Plan](./AI_NA
   - `GET /api/discuss/messages?conversationId=...`
   - `POST /api/discuss/messages`
 - The Discuss UI calls the database API first and falls back to demo mode only when the database is not available.
+- Training plan workflow has been modeled:
+  - `TrainingPlan` stores each employee's target hours, current hours, missing hours, due date, assignee and status for a cycle.
+  - `TrainingReminder` stores scheduled/sent reminder events by channel.
+  - The Training screen now derives a practical plan from missing hours and explains the rollover rule after a cycle ends.
+- Certificate upload/OCR now evaluates whether the extracted study/end or issued date belongs to the active cycle. Certificates outside the active cycle are still stored as evidence, but their hours are not counted toward the current cycle.
+- Individual compliance-cycle foundation has been added:
+  - `CompliancePolicy` defines rules such as 120 periods / 5 years and annual minimums.
+  - `EmployeeComplianceCycle` stores each employee's own start/end date, required hours, approved hours, missing hours and status.
+  - `CreditRecord` links approved certificate hours to the correct employee cycle by credit date.
+  - Employee profiles now capture license issue/start date so the system can derive a personal 5-year cycle instead of relying only on one global unit cycle.
+  - The Training screen now shows each employee's personal cycle window and uses policy hours for compliance calculations.
+- Organization master data has been expanded for commercialization:
+  - Departments can carry codes and responsible managers.
+  - Positions can carry a default compliance policy, required hours, annual minimum hours and CCHN requirement.
+
+## CME Rule Notes for Vietnam
+
+- Licensed medical practitioners in examination/treatment are tracked with a default rule of 48 training periods in 2 consecutive years.
+- Other health workers can be configured with the 120 training periods in 5 consecutive years rule, including a minimum annual threshold where needed.
+- Multiple valid continuing training forms can be accumulated within the applicable cycle.
+- When a cycle closes, the system should freeze summaries and reports, create the next cycle, and start counting new-cycle hours from zero. Old certificates remain in the evidence archive and should only be counted if assigned to the cycle that matches their training/completion date.
+- For large deployments, the recommended operational model is server-side summary calculation: when a certificate is approved, create/update a `CreditRecord`, attach it to the employee cycle matching the credit date, and recalculate `EmployeeComplianceCycle`/`TrainingSummary` in the database. Dashboards should read summaries instead of scanning all certificates on every page load.
 
 ## Required Local Setup
 

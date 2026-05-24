@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BarChart3, Bot, FileCheck2, GraduationCap, LayoutDashboard, MessageCircle, Settings, ShieldCheck, Users } from "lucide-react";
-import { getEmployees, getSettings } from "@/lib/demo-store";
-import { employees as seedEmployees } from "@/lib/mock-data";
+import type { DemoEmployee } from "@/lib/demo-store";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -21,19 +20,34 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [employees, setEmployees] = useState(seedEmployees);
-  const [settings, setSettings] = useState({
-    appName: "Hệ thống Đào tạo Liên tục",
-    requiredHours: 48,
-    cycleStartYear: 2025,
-    cycleEndYear: 2026,
-    ocrProvider: "mock",
-    storageProvider: "local"
-  });
+  const [employees, setEmployees] = useState<DemoEmployee[]>([]);
+  const [cycle, setCycle] = useState<{ startYear: number; endYear: number } | null>(null);
 
   useEffect(() => {
-    setEmployees(getEmployees());
-    setSettings(getSettings());
+    let mounted = true;
+
+    async function loadSummary() {
+      try {
+        const [employeesResponse, cycleResponse] = await Promise.all([
+          fetch("/api/employees", { cache: "no-store" }),
+          fetch("/api/training/cycles", { cache: "no-store" })
+        ]);
+        const employeesPayload = employeesResponse.ok ? await employeesResponse.json() as { data: DemoEmployee[] } : { data: [] };
+        const cyclePayload = cycleResponse.ok ? await cycleResponse.json() as { data: { startYear: number; endYear: number } | null } : { data: null };
+        if (!mounted) return;
+        setEmployees(Array.isArray(employeesPayload.data) ? employeesPayload.data : []);
+        setCycle(cyclePayload.data);
+      } catch {
+        if (!mounted) return;
+        setEmployees([]);
+        setCycle(null);
+      }
+    }
+
+    void loadSummary();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const totalRequiredHours = employees.reduce((sum, employee) => sum + employee.requiredHours, 0);
@@ -74,7 +88,7 @@ export function Sidebar() {
       <div className="m-4 rounded-2xl border bg-teal-50 p-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-teal-900">Chu kỳ {settings.cycleStartYear}-{settings.cycleEndYear}</div>
+            <div className="text-sm font-semibold text-teal-900">{cycle ? `Chu kỳ ${cycle.startYear}-${cycle.endYear}` : "Chưa cấu hình chu kỳ"}</div>
             <div className="mt-1 text-xs text-teal-700">{completed}/{employees.length} hồ sơ đạt yêu cầu</div>
           </div>
           <div className="rounded-xl bg-white px-2.5 py-1 text-xs font-bold text-teal-700">{progress}%</div>
