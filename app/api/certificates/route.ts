@@ -57,7 +57,6 @@ export async function GET(request: Request) {
     const certificates = await prisma.certificate.findMany({
       where: {
         ...tenantWhere(actor),
-        deletedAt: null,
         ...(q
           ? {
               OR: [
@@ -185,7 +184,6 @@ async function detectDuplicateCertificate(certificateCode: string | undefined, p
   const existing = await prisma.certificate.findFirst({
     where: {
       ...tenantWhere(actor),
-      deletedAt: null,
       ...(payload.id ? { NOT: { id: payload.id } } : {}),
       OR: [
         ...(certificateCode ? [{ certificateCode }] : []),
