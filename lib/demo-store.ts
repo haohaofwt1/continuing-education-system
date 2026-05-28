@@ -30,6 +30,20 @@ export type DemoCertificate = (typeof seedCertificates)[number] & {
   includeInCycle?: boolean;
   cycleCountedHours?: number;
   cycleReason?: string;
+  proposedCredits?: number | null;
+  countedCredits?: number | null;
+  recognizedCredits?: number | null;
+  issueDate?: string | null;
+  cycleStart?: string | null;
+  cycleEnd?: string | null;
+  cycleId?: string | null;
+  calculationStatus?: "counted" | "out_of_cycle" | "needs_info" | "duplicate_suspected" | string | null;
+  calculationReason?: string | null;
+  uploadedBy?: string | null;
+  employeeId?: string | null;
+  isDuplicateSuspected?: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 const employeeKey = "cme.demo.employees";

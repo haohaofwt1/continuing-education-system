@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -21,15 +21,16 @@ export function LoginForm() {
           email: String(formData.get("email") ?? ""),
           password: String(formData.get("password") ?? ""),
           redirect: false,
-          callbackUrl: "/dashboard"
+          callbackUrl: "/"
         });
         setLoading(false);
         if (result?.error) {
-          window.localStorage.setItem("cme.demo.session", JSON.stringify({ email: String(formData.get("email") ?? ""), role: "Super Admin", mode: "demo" }));
-          window.location.href = "/dashboard";
+          setError("Không đăng nhập được. Hãy bật database test rồi thử lại, hoặc kiểm tra email/mật khẩu.");
           return;
         }
-        window.location.href = result?.url ?? "/dashboard";
+        const session = await getSession();
+        const employeeMode = ["Nhan vien", "Nhân viên", "Employee", "EMPLOYEE"].includes(session?.user?.role ?? "");
+        window.location.href = employeeMode ? "/portal" : (result?.url ?? "/dashboard");
       }}
     >
       <Input name="email" type="email" defaultValue="admin@example.com" />

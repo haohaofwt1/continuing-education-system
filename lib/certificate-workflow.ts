@@ -31,7 +31,7 @@ export async function transitionCertificateReview({
   note?: string | null;
   data?: Record<string, unknown>;
 }) {
-  const before = await prisma.certificate.findFirst({ where: { id: certificateId, ...tenantWhere(actor) } });
+  const before = await prisma.certificate.findFirst({ where: { id: certificateId, ...tenantWhere(actor), deletedAt: null } });
   if (!before) throw new Error("CERTIFICATE_NOT_FOUND");
 
   const allowed = certificateWorkflow[before.reviewStatus] ?? [];

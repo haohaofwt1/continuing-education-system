@@ -6,7 +6,7 @@ export const positions = ["Bác sĩ", "Dược sĩ", "Điều dưỡng", "Kỹ t
 export const employees = [
   { id: "u1", name: "Nguyễn Văn An", username: "nvan", email: "an@example.com", phone: "0901000001", department: "Phòng khám", position: "Bác sĩ", role: "Quản lý khoa/phòng", licenseNumber: "CCHN-1001", status: "Hoạt động", hours: 32, requiredHours: 48 },
   { id: "u2", name: "Trần Thị Bình", username: "ttbinh", email: "binh@example.com", phone: "0901000002", department: "Phòng xét nghiệm", position: "Kỹ thuật viên", role: "Nhân viên", licenseNumber: "CCHN-1002", status: "Hoạt động", hours: 52, requiredHours: 36 },
-  { id: "u3", name: "Lê Quốc Cường", username: "lqcuong", email: "cuong@example.com", phone: "0901000003", department: "Phòng chẩn đoán hình ảnh", position: "Bác sĩ", role: "Người kiểm duyệt", licenseNumber: "", status: "Thiếu CCHN", hours: 18, requiredHours: 48 },
+  { id: "u3", name: "Lê Quốc Cường", username: "lqcuong", email: "cuong@example.com", phone: "0901000003", department: "Phòng chẩn đoán hình ảnh", position: "Bác sĩ", role: "Người rà soát báo cáo", licenseNumber: "", status: "Thiếu CCHN", hours: 18, requiredHours: 48 },
   { id: "u4", name: "Phạm Minh Châu", username: "pmchau", email: "chau@example.com", phone: "0901000004", department: "Phòng Dược", position: "Dược sĩ", role: "Nhân viên", licenseNumber: "CCHN-1004", status: "Hoạt động", hours: 44, requiredHours: 48 },
   { id: "u5", name: "Hoàng Thị Dung", username: "htdung", email: "dung@example.com", phone: "0901000005", department: "Phòng khám", position: "Điều dưỡng", role: "Nhân viên", licenseNumber: "CCHN-1005", status: "Hoạt động", hours: 12, requiredHours: 48 },
   { id: "u6", name: "Đỗ Thanh Hải", username: "dthai", email: "hai@example.com", phone: "0901000006", department: "Phòng xét nghiệm", position: "Kỹ thuật viên", role: "Nhân viên", licenseNumber: "CCHN-1006", status: "Tạm khóa", hours: 28, requiredHours: 36 },
@@ -17,9 +17,9 @@ export const employees = [
 ];
 
 export const certificates = [
-  { id: "c1", code: "CERT-2026-001", title: "Kiểm soát nhiễm khuẩn cơ bản", holder: "Nguyễn Văn An", department: "Phòng khám", position: "Bác sĩ", type: "Kiểm soát nhiễm khuẩn", issuer: "Bệnh viện Trung tâm", issuedDate: "2026-01-12", expiredDate: "2026-11-30", hours: 12, status: "Đã duyệt", tone: "green" as StatusTone, ocrStatus: "Đã đọc", confidence: 0.93, thumbnail: "/placeholder-certificate.svg" },
-  { id: "c2", code: "CERT-2026-002", title: "Cập nhật cấp cứu ban đầu", holder: "Trần Thị Bình", department: "Phòng xét nghiệm", position: "Kỹ thuật viên", type: "Cấp cứu", issuer: "Trường Đại học Y Dược", issuedDate: "2026-02-08", expiredDate: null, hours: 24, status: "Chờ duyệt", tone: "yellow" as StatusTone, ocrStatus: "Chờ xác nhận", confidence: 0.86, thumbnail: "/placeholder-certificate.svg" },
-  { id: "c3", code: "CERT-2026-003", title: "An toàn người bệnh nâng cao", holder: "Lê Quốc Cường", department: "Phòng chẩn đoán hình ảnh", position: "Bác sĩ", type: "An toàn người bệnh", issuer: "Sở Y tế", issuedDate: "2026-03-16", expiredDate: null, hours: 8, status: "Thiếu thông tin", tone: "gray" as StatusTone, ocrStatus: "Đọc lỗi", confidence: 0.51, thumbnail: "/placeholder-certificate.svg" },
+  { id: "c1", code: "CERT-2026-001", title: "Kiểm soát nhiễm khuẩn cơ bản", holder: "Nguyễn Văn An", department: "Phòng khám", position: "Bác sĩ", type: "Kiểm soát nhiễm khuẩn", issuer: "Bệnh viện Trung tâm", issuedDate: "2026-01-12", expiredDate: "2026-11-30", hours: 12, status: "Được tính", tone: "green" as StatusTone, ocrStatus: "Đã đọc", confidence: 0.93, thumbnail: "/placeholder-certificate.svg" },
+  { id: "c2", code: "CERT-2026-002", title: "Cập nhật cấp cứu ban đầu", holder: "Trần Thị Bình", department: "Phòng xét nghiệm", position: "Kỹ thuật viên", type: "Cấp cứu", issuer: "Trường Đại học Y Dược", issuedDate: "2026-02-08", expiredDate: null, hours: 24, status: "Được tính", tone: "green" as StatusTone, ocrStatus: "Đã đọc", confidence: 0.86, thumbnail: "/placeholder-certificate.svg" },
+  { id: "c3", code: "CERT-2026-003", title: "An toàn người bệnh nâng cao", holder: "Lê Quốc Cường", department: "Phòng chẩn đoán hình ảnh", position: "Bác sĩ", type: "An toàn người bệnh", issuer: "Sở Y tế", issuedDate: "2026-03-16", expiredDate: null, hours: 8, status: "Cần nhập thêm thông tin", tone: "gray" as StatusTone, ocrStatus: "Đọc lỗi", confidence: 0.51, thumbnail: "/placeholder-certificate.svg" },
   { id: "c4", code: "CERT-2026-004", title: "Dược lâm sàng và sử dụng thuốc an toàn", holder: "Phạm Minh Châu", department: "Phòng Dược", position: "Dược sĩ", type: "Dược lâm sàng", issuer: "Hội Dược học", issuedDate: "2025-12-21", expiredDate: "2026-06-28", hours: 16, status: "Sắp hết hạn", tone: "yellow" as StatusTone, ocrStatus: "Đã đọc", confidence: 0.9, thumbnail: "/placeholder-certificate.svg" },
   { id: "c5", code: "CERT-2025-019", title: "Đào tạo liên tục chuyên ngành điều dưỡng", holder: "Hoàng Thị Dung", department: "Phòng khám", position: "Điều dưỡng", type: "Đào tạo liên tục", issuer: "Trung tâm đào tạo Y khoa", issuedDate: "2025-04-05", expiredDate: "2026-01-01", hours: 12, status: "Đã hết hạn", tone: "red" as StatusTone, ocrStatus: "Đã đọc", confidence: 0.88, thumbnail: "/placeholder-certificate.svg" }
 ];
@@ -39,7 +39,7 @@ export const hoursByDepartment = departments.map((department, index) => ({
 }));
 
 export const tasksToday = [
-  "Duyệt 5 chứng chỉ đang chờ",
+  "Kiểm tra 5 chứng chỉ cần nhập thêm thông tin",
   "Nhắc 15 nhân sự thiếu số tiết",
   "Rà soát 12 hồ sơ thiếu số CCHN",
   "Kiểm tra 3 chứng chỉ nghi trùng"

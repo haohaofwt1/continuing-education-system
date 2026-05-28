@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Copy, Download, Edit3, Eye, KeyRound, Link2, Plus, QrCode, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -30,7 +30,7 @@ type AuditItem = { id: string; actor: string; action: string; module: string; ta
 type ApiKeyItem = { id: string; name: string; maskedKey: string; status: "Hoạt động" | "Tạm khóa"; lastUsed: string; createdAt: string };
 type QrItem = { id: string; name: string; type: "Chứng chỉ" | "Báo cáo"; url: string; createdBy: string; expiresAt: string; status: "Hoạt động" | "Hết hạn" };
 
-const roles = ["Super Admin", "Admin đơn vị", "Quản lý khoa/phòng", "Nhân viên", "Người kiểm duyệt", "Người chỉ xem báo cáo"];
+const roles = ["Super Admin", "Admin đơn vị", "Quản lý khoa/phòng", "Nhân viên", "Người rà soát báo cáo", "Người chỉ xem báo cáo"];
 const accountStatuses = ["Hoạt động", "Thiếu CCHN", "Tạm khóa"];
 const categoryKinds: CategoryKind[] = ["Khoa/phòng", "Chức danh", "Loại chứng chỉ", "Đơn vị cấp", "Chu kỳ đào tạo"];
 
@@ -44,7 +44,7 @@ const categorySeed: CategoryItem[] = [
 
 const auditSeed: AuditItem[] = [
   { id: "a1", actor: "admin@example.com", action: "Tạo chứng chỉ", module: "Chứng chỉ", target: "CERT-2026-001", at: "2026-05-21 08:30", ip: "127.0.0.1" },
-  { id: "a2", actor: "admin@example.com", action: "Duyệt chứng chỉ", module: "Chứng chỉ", target: "CERT-2026-002", at: "2026-05-21 09:05", ip: "127.0.0.1" },
+  { id: "a2", actor: "system", action: "Tự động tính tín chỉ", module: "Chứng chỉ", target: "CERT-2026-002", at: "2026-05-21 09:05", ip: "127.0.0.1" },
   { id: "a3", actor: "system", action: "Import nhân sự", module: "Nhân sự", target: "10 dòng", at: "2026-05-20 17:40", ip: "127.0.0.1" },
   { id: "a4", actor: "admin@example.com", action: "Cập nhật cài đặt", module: "Cài đặt", target: "Chu kỳ 2025-2026", at: "2026-05-20 21:12", ip: "127.0.0.1" }
 ];
@@ -84,6 +84,22 @@ export function AccountsAdminClient() {
   const [editing, setEditing] = useState<DemoEmployee | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DemoEmployee | null>(null);
   const [notice, setNotice] = useState("");
+  const [databaseReady, setDatabaseReady] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/accounts", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("accounts unavailable")))
+      .then((payload: { data: DemoEmployee[] }) => {
+        if (!Array.isArray(payload.data)) return;
+        setItems(payload.data);
+        setDatabaseReady(true);
+        setNotice("Tài khoản đang được tải từ database.");
+      })
+      .catch(() => {
+        setDatabaseReady(false);
+        setNotice("Database chưa sẵn sàng, tài khoản đang hiển thị từ dữ liệu demo trên trình duyệt.");
+      });
+  }, []);
 
   const filtered = useMemo(() => items.filter((item) => {
     const haystack = `${item.name} ${item.email} ${item.phone} ${item.role} ${item.department}`.toLowerCase();
@@ -97,7 +113,7 @@ export function AccountsAdminClient() {
     setNotice(message);
   };
 
-  const saveAccount = (event: React.FormEvent<HTMLFormElement>) => {
+  const saveAccount = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editing) return;
     const form = new FormData(event.currentTarget);
@@ -117,13 +133,71 @@ export function AccountsAdminClient() {
       requiredHours: editing.requiredHours ?? 48
     };
     const exists = items.some((item) => item.id === next.id);
-    persist(exists ? items.map((item) => item.id === next.id ? next : item) : [next, ...items], "Đã lưu tài khoản.");
+    if (databaseReady) {
+      const response = await fetch("/api/admin/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next)
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setNotice("Chưa lưu được tài khoản vào database. Kiểm tra email/tên đăng nhập có bị trùng không.");
+        return;
+      }
+      const saved = payload.data as DemoEmployee;
+      persist(exists ? items.map((item) => item.id === saved.id ? saved : item) : [saved, ...items], "Đã lưu tài khoản vào database.");
+      setEditing(null);
+      return;
+    }
+    persist(exists ? items.map((item) => item.id === next.id ? next : item) : [next, ...items], "Đã lưu tài khoản trong trình duyệt.");
     setEditing(null);
   };
 
-  const bulkStatus = (nextStatus: string) => {
+  const bulkStatus = async (nextStatus: string) => {
+    if (databaseReady) {
+      await Promise.all(selectedIds.map((id) =>
+        fetch("/api/admin/accounts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, action: "status", status: nextStatus })
+        })
+      ));
+    }
     persist(items.map((item) => selectedIds.includes(item.id) ? { ...item, status: nextStatus } : item), `Đã cập nhật ${selectedIds.length} tài khoản.`);
     setSelectedIds([]);
+  };
+
+  const resetPassword = async (account: DemoEmployee) => {
+    if (!databaseReady) {
+      setNotice("Database chưa sẵn sàng nên chưa reset mật khẩu thật được.");
+      return;
+    }
+    const response = await fetch("/api/admin/accounts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: account.id, action: "reset-password" })
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setNotice("Chưa reset được mật khẩu. Kiểm tra database và quyền quản trị.");
+      return;
+    }
+    setNotice(`Mật khẩu mới cho ${account.email}: ${payload.password}`);
+  };
+
+  const deleteAccount = async (account: DemoEmployee) => {
+    if (databaseReady) {
+      const response = await fetch(`/api/admin/accounts?id=${encodeURIComponent(account.id)}`, { method: "DELETE" });
+      if (!response.ok) {
+        setNotice("Chưa khóa/xóa được tài khoản trong database.");
+        return;
+      }
+      persist(items.map((item) => item.id === account.id ? { ...item, status: "Tạm khóa" } : item), "Đã tạm khóa tài khoản trong database.");
+      setDeleteTarget(null);
+      return;
+    }
+    persist(items.filter((item) => item.id !== account.id), "Đã xóa tài khoản demo.");
+    setDeleteTarget(null);
   };
 
   const emptyAccount: DemoEmployee = { id: "", name: "", username: "", email: "", phone: "", department: departments[0], position: positions[0], role: "Nhân viên", licenseNumber: "", status: "Hoạt động", hours: 0, requiredHours: 48 };
@@ -132,6 +206,9 @@ export function AccountsAdminClient() {
     <>
       <PageHeader eyebrow="Quản trị" title="Tài khoản" description="Quản lý user, vai trò, trạng thái, reset mật khẩu và khóa/mở tài khoản." actions={<Button onClick={() => setEditing(emptyAccount)}><Plus className="h-4 w-4" />Thêm tài khoản</Button>} />
       <Notice text={notice} />
+      <div className={`mb-4 rounded-2xl p-4 text-sm font-semibold ${databaseReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
+        {databaseReady ? "Danh sách tài khoản đang load từ database. Reset mật khẩu sẽ cập nhật passwordHash thật." : "Database chưa sẵn sàng, đang hiển thị dữ liệu demo trong trình duyệt."}
+      </div>
       <AdminToolbar>
         <SearchInput value={query} onChange={(value) => { setQuery(value); setPage(1); }} placeholder="Tìm tên, email, vai trò..." />
         <Select value={role} onChange={(value) => { setRole(value); setPage(1); }} options={["", ...roles]} labels={{ "": "Tất cả vai trò" }} />
@@ -144,10 +221,10 @@ export function AccountsAdminClient() {
       <Card className="mt-4 overflow-hidden">
         <Table>
           <thead className="bg-teal-50 text-xs uppercase text-slate-500"><tr><th className="p-4"><input type="checkbox" checked={pageItems.length > 0 && pageItems.every((item) => selectedIds.includes(item.id))} onChange={() => togglePage(pageItems.map((item) => item.id), selectedIds, setSelectedIds)} className="h-4 w-4 accent-teal-600" /></th><th>Tài khoản</th><th>Khoa/phòng</th><th>Chức danh</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-          <tbody className="divide-y bg-white">{pageItems.map((item) => <tr key={item.id} className="hover:bg-teal-50/40"><td className="p-4"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleOne(item.id, setSelectedIds)} className="h-4 w-4 accent-teal-600" /></td><td><div className="flex items-center gap-3"><Avatar /><div><div className="font-semibold">{item.name}</div><div className="text-xs text-slate-500">{item.email} · {item.phone}</div></div></div></td><td>{item.department}</td><td>{item.position}</td><td>{item.role}</td><td><StatusBadge status={item.status} /></td><td><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => setNotice(`Đã gửi link reset mật khẩu cho ${item.email}.`)}><RefreshCw className="h-4 w-4" />Reset</Button><Button size="icon" variant="ghost" onClick={() => setEditing(item)}><Edit3 className="h-4 w-4" /></Button><Button size="icon" variant="ghost" onClick={() => setDeleteTarget(item)}><Trash2 className="h-4 w-4" /></Button></div></td></tr>)}</tbody>
+          <tbody className="divide-y bg-white">{pageItems.map((item) => <tr key={item.id} className="hover:bg-teal-50/40"><td className="p-4"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleOne(item.id, setSelectedIds)} className="h-4 w-4 accent-teal-600" /></td><td><div className="flex items-center gap-3"><Avatar /><div><div className="font-semibold">{item.name}</div><div className="text-xs text-slate-500">{item.email} · {item.phone}</div></div></div></td><td>{item.department}</td><td>{item.position}</td><td>{item.role}</td><td><StatusBadge status={item.status} /></td><td><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => void resetPassword(item)}><RefreshCw className="h-4 w-4" />Reset</Button><Button size="icon" variant="ghost" onClick={() => setEditing(item)}><Edit3 className="h-4 w-4" /></Button><Button size="icon" variant="ghost" onClick={() => setDeleteTarget(item)}><Trash2 className="h-4 w-4" /></Button></div></td></tr>)}</tbody>
         </Table>
       </Card>
-      {deleteTarget ? <ConfirmDialog title="Xóa tài khoản này?" description="Demo sẽ xóa tài khoản khỏi localStorage. Thực tế nên tạm khóa nếu cần giữ lịch sử." onCancel={() => setDeleteTarget(null)} onConfirm={() => { persist(items.filter((item) => item.id !== deleteTarget.id), "Đã xóa tài khoản."); setDeleteTarget(null); }} /> : null}
+      {deleteTarget ? <ConfirmDialog title="Khóa tài khoản này?" description="Với database thật, thao tác này sẽ tạm khóa tài khoản để giữ lịch sử. Chế độ demo sẽ xóa khỏi localStorage." onCancel={() => setDeleteTarget(null)} onConfirm={() => void deleteAccount(deleteTarget)} /> : null}
     </>
   );
 }
@@ -162,11 +239,29 @@ export function CategoriesAdminClient() {
   const [editing, setEditing] = useState<CategoryItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CategoryItem | null>(null);
   const [notice, setNotice] = useState("");
+  const [databaseReady, setDatabaseReady] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/catalog", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("catalog unavailable")))
+      .then((payload: { data: CategoryItem[] }) => {
+        if (!Array.isArray(payload.data)) return;
+        const databaseItems = payload.data;
+        const localOnly = readLocal("cme.demo.categories", categorySeed).filter((item) => !["Khoa/phòng", "Chức danh"].includes(item.kind));
+        setItems([...databaseItems, ...localOnly]);
+        setDatabaseReady(true);
+      })
+      .catch(() => {
+        setDatabaseReady(false);
+        setNotice("Database chưa sẵn sàng, danh mục đang chạy ở chế độ demo trên trình duyệt.");
+      });
+  }, []);
+
   const filtered = items.filter((item) => (!kind || item.kind === kind) && (!query || `${item.name} ${item.kind} ${item.note}`.toLowerCase().includes(query.toLowerCase())));
   const { pageItems, pageStart, pageEnd, totalPages, currentPage } = paginate(filtered, page, pageSize);
   const persist = (next: CategoryItem[], message: string) => { setItems(next); writeLocal("cme.demo.categories", next); setNotice(message); };
 
-  const save = (event: React.FormEvent<HTMLFormElement>) => {
+  const save = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editing) return;
     const form = new FormData(event.currentTarget);
@@ -185,8 +280,37 @@ export function CategoriesAdminClient() {
       status: String(form.get("status")) as CategoryItem["status"],
       note: String(form.get("note") ?? "")
     };
-    persist(items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items], "Đã lưu danh mục.");
+    if (["Khoa/phòng", "Chức danh"].includes(next.kind) && databaseReady) {
+      const response = await fetch("/api/admin/catalog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next)
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setNotice("Chưa lưu được vào database. Kiểm tra tên/mã có bị trùng hoặc danh mục đang được sử dụng.");
+        return;
+      }
+      const saved = payload.data as CategoryItem;
+      persist(items.some((item) => item.id === saved.id) ? items.map((item) => item.id === saved.id ? { ...next, ...saved } : item) : [{ ...next, ...saved }, ...items], "Đã lưu danh mục vào database.");
+      setEditing(null);
+      return;
+    }
+
+    persist(items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items], databaseReady ? "Đã lưu danh mục demo." : "Đã lưu danh mục trong trình duyệt.");
     setEditing(null);
+  };
+
+  const deleteCategory = async (item: CategoryItem) => {
+    if (["Khoa/phòng", "Chức danh"].includes(item.kind) && databaseReady) {
+      const response = await fetch(`/api/admin/catalog?id=${encodeURIComponent(item.id)}&kind=${encodeURIComponent(item.kind)}`, { method: "DELETE" });
+      if (!response.ok) {
+        setNotice("Chưa xóa được. Danh mục có thể đang được nhân sự hoặc chứng chỉ sử dụng.");
+        return;
+      }
+    }
+    persist(items.filter((entry) => entry.id !== item.id), "Đã xóa danh mục.");
+    setDeleteTarget(null);
   };
 
   const bulkStatus = (nextStatus: CategoryItem["status"]) => {
@@ -198,6 +322,9 @@ export function CategoriesAdminClient() {
     <>
       <PageHeader eyebrow="Quản trị" title="Danh mục tổ chức" description="Quản lý khoa/phòng, chức danh và chính sách đào tạo để tự gán chu kỳ tuân thủ cho nhân sự." actions={<Button onClick={() => setEditing({ id: "", kind: kind || "Khoa/phòng", name: "", status: "Hoạt động", note: "" })}><Plus className="h-4 w-4" />Thêm danh mục</Button>} />
       <Notice text={notice} />
+      <div className={`mb-4 rounded-2xl p-4 text-sm font-semibold ${databaseReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
+        {databaseReady ? "Khoa/Phòng và Chức danh đang lưu trực tiếp vào database." : "Database chưa bật, thay đổi tạm lưu ở trình duyệt."}
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <Card className="h-fit overflow-hidden">
@@ -264,7 +391,7 @@ export function CategoriesAdminClient() {
           </Card>
         </div>
       </div>
-      {deleteTarget ? <ConfirmDialog title="Xóa danh mục này?" description="Không nên xóa danh mục đang được chứng chỉ/nhân sự sử dụng trong dữ liệu thật." onCancel={() => setDeleteTarget(null)} onConfirm={() => { persist(items.filter((item) => item.id !== deleteTarget.id), "Đã xóa danh mục."); setDeleteTarget(null); }} /> : null}
+      {deleteTarget ? <ConfirmDialog title="Xóa danh mục này?" description="Không nên xóa danh mục đang được chứng chỉ/nhân sự sử dụng trong dữ liệu thật." onCancel={() => setDeleteTarget(null)} onConfirm={() => void deleteCategory(deleteTarget)} /> : null}
     </>
   );
 }

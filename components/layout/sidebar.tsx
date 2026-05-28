@@ -3,25 +3,33 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BarChart3, Bot, FileCheck2, GraduationCap, LayoutDashboard, MessageCircle, Settings, ShieldCheck, Users } from "lucide-react";
+import { BarChart3, Bot, FileCheck2, GraduationCap, IdCard, LayoutDashboard, MessageCircle, Settings, ShieldCheck, Users } from "lucide-react";
 import type { DemoEmployee } from "@/lib/demo-store";
+import { isEmployeeRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
 const navigation = [
+  { href: "/portal", label: "Tổng quan", icon: LayoutDashboard, employee: true },
+  { href: "/portal/certificates", label: "Chứng chỉ của tôi", icon: FileCheck2, employee: true },
+  { href: "/portal/profile", label: "Thông tin cá nhân", icon: IdCard, employee: true },
+  { href: "/discuss", label: "Discuss", icon: MessageCircle, employee: true },
   { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/employees", label: "Hồ sơ nhân sự", icon: Users },
   { href: "/certificates", label: "Chứng chỉ", icon: FileCheck2 },
-  { href: "/training", label: "Đào tạo liên tục", icon: GraduationCap },
+  { href: "/training", label: "Chu kỳ CME", icon: GraduationCap },
   { href: "/reports", label: "Báo cáo", icon: BarChart3 },
   { href: "/discuss", label: "Discuss", icon: MessageCircle },
   { href: "/ai-assistant", label: "Trợ lý AI", icon: Bot },
   { href: "/admin", label: "Quản trị", icon: Settings }
 ];
 
-export function Sidebar() {
+export function Sidebar({ initialRole = "" }: { initialRole?: string }) {
   const pathname = usePathname();
   const [employees, setEmployees] = useState<DemoEmployee[]>([]);
   const [cycle, setCycle] = useState<{ startYear: number; endYear: number } | null>(null);
+  const [role, setRole] = useState<string>(initialRole);
+
+  const employeeMode = isEmployeeRole(role);
 
   useEffect(() => {
     let mounted = true;
@@ -29,13 +37,17 @@ export function Sidebar() {
     async function loadSummary() {
       try {
         const [employeesResponse, cycleResponse] = await Promise.all([
-          fetch("/api/employees", { cache: "no-store" }),
+          fetch(employeeMode ? "/api/portal/overview" : "/api/employees", { cache: "no-store" }),
           fetch("/api/training/cycles", { cache: "no-store" })
         ]);
-        const employeesPayload = employeesResponse.ok ? await employeesResponse.json() as { data: DemoEmployee[] } : { data: [] };
+        const employeesPayload = employeesResponse.ok ? await employeesResponse.json() as { data: DemoEmployee[] | { employee?: DemoEmployee } } : { data: [] };
         const cyclePayload = cycleResponse.ok ? await cycleResponse.json() as { data: { startYear: number; endYear: number } | null } : { data: null };
         if (!mounted) return;
-        setEmployees(Array.isArray(employeesPayload.data) ? employeesPayload.data : []);
+        if (employeeMode && !Array.isArray(employeesPayload.data)) {
+          setEmployees(employeesPayload.data.employee ? [employeesPayload.data.employee] : []);
+        } else {
+          setEmployees(Array.isArray(employeesPayload.data) ? employeesPayload.data : []);
+        }
         setCycle(cyclePayload.data);
       } catch {
         if (!mounted) return;
@@ -45,10 +57,14 @@ export function Sidebar() {
     }
 
     void loadSummary();
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((session: { user?: { role?: string } } | null) => setRole(session?.user?.role ?? ""))
+      .catch(() => setRole(""));
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [employeeMode]);
 
   const totalRequiredHours = employees.reduce((sum, employee) => sum + employee.requiredHours, 0);
   const totalHours = employees.reduce((sum, employee) => sum + Math.min(employee.hours, employee.requiredHours), 0);
@@ -62,13 +78,13 @@ export function Sidebar() {
           <ShieldCheck className="h-6 w-6" />
         </div>
         <div>
-          <div className="text-sm font-bold uppercase tracking-wide text-teal-700">CME System</div>
-          <div className="text-xs text-slate-500">Đào tạo liên tục</div>
+          <div className="text-sm font-bold uppercase tracking-wide text-teal-700">{employeeMode ? "CME Portal" : "CME System"}</div>
+          <div className="text-xs text-slate-500">{employeeMode ? "Cá nhân" : "Đào tạo liên tục"}</div>
         </div>
       </div>
       <nav className="flex-1 space-y-1 px-4 py-4">
-        {navigation.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        {navigation.filter((item) => employeeMode ? item.employee : !item.employee).map((item) => {
+          const active = pathname === item.href || (!item.employee && pathname.startsWith(`${item.href}/`));
           const Icon = item.icon;
           return (
             <Link
@@ -97,8 +113,8 @@ export function Sidebar() {
           <div className="h-2 rounded-full bg-teal-600 transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-          <Link href="/training" className="rounded-xl bg-white px-3 py-2 font-semibold text-teal-700 transition hover:bg-teal-100">Xem chu kỳ</Link>
-          <Link href="/reports" className="rounded-xl bg-white px-3 py-2 font-semibold text-teal-700 transition hover:bg-teal-100">Báo cáo</Link>
+          <Link href={employeeMode ? "/portal" : "/training"} className="rounded-xl bg-white px-3 py-2 font-semibold text-teal-700 transition hover:bg-teal-100">Xem chu kỳ</Link>
+          <Link href={employeeMode ? "/portal/certificates" : "/reports"} className="rounded-xl bg-white px-3 py-2 font-semibold text-teal-700 transition hover:bg-teal-100">{employeeMode ? "Chứng chỉ" : "Báo cáo"}</Link>
         </div>
       </div>
     </aside>

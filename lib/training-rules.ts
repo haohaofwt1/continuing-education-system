@@ -160,7 +160,7 @@ export function buildTrainingPlanItems<T extends {
         missingHours,
         recommendedHours,
         dueDate,
-        owner: record.department || "Phòng đào tạo",
+        owner: record.department || "Hệ thống tự kiểm tra theo chu kỳ",
         status: missingHours === 0 ? "Đúng tiến độ" : isPastDue(dueDate) ? "Quá hạn" : "Cần bổ sung",
         reminderCadence: missingHours > 0 ? "Nhắc mỗi 30 ngày, tăng tần suất 60 ngày cuối chu kỳ" : "Không cần nhắc"
       } satisfies TrainingPlanItem;

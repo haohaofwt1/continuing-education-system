@@ -217,9 +217,9 @@ export function TrainingClient() {
   return (
     <>
       <PageHeader
-        eyebrow="Chu kỳ tuân thủ"
-        title={hasActiveCycle ? `Đào tạo liên tục ${cycleLabel}` : "Đào tạo liên tục"}
-        description={hasActiveCycle ? "Theo dõi tiến độ tích lũy tín chỉ, phát hiện hồ sơ thiếu giờ và lập kế hoạch nhắc bổ sung." : "Chưa có chu kỳ đang áp dụng. Hãy cấu hình chu kỳ để bắt đầu tính tuân thủ."}
+        eyebrow="Chu kỳ CME"
+        title={hasActiveCycle ? `Theo dõi chu kỳ CME ${cycleLabel}` : "Theo dõi chu kỳ CME"}
+        description={hasActiveCycle ? "Màn hình chuyên xử lý nghĩa vụ đào tạo: ai thiếu bao nhiêu tiết, hạn bổ sung, lịch nhắc và quy tắc chuyển chu kỳ." : "Chưa có chu kỳ đang áp dụng. Hãy cấu hình chu kỳ để bắt đầu tính thiếu/đạt."}
         actions={
           <>
             <Button variant="secondary" onClick={() => downloadCsv(selectedIds.length ? "dao-tao-da-chon.csv" : "dao-tao-dang-hien-thi.csv", selectedRows)} disabled={!selectedRows.length}><Download className="h-4 w-4" />{selectedIds.length ? `Xuất ${selectedIds.length} đã chọn` : "Xuất dữ liệu"}</Button>
@@ -240,8 +240,8 @@ export function TrainingClient() {
       <section className="mt-6">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold uppercase text-teal-700">Kế hoạch đào tạo</div>
-            <h2 className="mt-1 text-xl font-bold text-slate-950">Kế hoạch bổ sung số tiết</h2>
+            <div className="text-sm font-semibold uppercase text-teal-700">Danh sách thiếu tín chỉ</div>
+            <h2 className="mt-1 text-xl font-bold text-slate-950">Kế hoạch bổ sung theo chu kỳ</h2>
           </div>
           <Button variant="secondary" onClick={remindSelected}><BellRing className="h-4 w-4" />Tạo lịch nhắc</Button>
         </div>
@@ -288,7 +288,7 @@ export function TrainingClient() {
           <div className="grid gap-3 lg:grid-cols-[1fr_200px_180px_180px]">
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-              <Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} className="pl-9" placeholder="Tìm nhân sự, khoa/phòng, CCHN..." />
+              <Input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} className="pl-9" placeholder="Tìm hồ sơ thiếu tín chỉ, khoa/phòng, CCHN..." />
             </div>
             <Select value={department} onChange={(value) => { setDepartment(value); setPage(1); }} options={["", ...departmentOptions]} labels={{ "": "Tất cả khoa/phòng" }} />
             <Select value={position} onChange={(value) => { setPosition(value); setPage(1); }} options={["", ...positionOptions]} labels={{ "": "Tất cả chức danh" }} />
@@ -317,7 +317,7 @@ export function TrainingClient() {
       ) : null}
 
       <div className="mt-4 flex items-center justify-between text-sm font-semibold text-slate-600">
-        <span>Hiển thị {filtered.length ? pageStart + 1 : 0}-{pageEnd} / {filtered.length} hồ sơ</span>
+        <span>Hiển thị {filtered.length ? pageStart + 1 : 0}-{pageEnd} / {filtered.length} hồ sơ theo chu kỳ</span>
         <PaginationControls
           page={currentPage}
           totalPages={totalPages}
@@ -667,10 +667,11 @@ function TrainingList({
               <SortHeader label="Khoa/phòng" sortKey="department" />
               <SortHeader label="Chức danh" sortKey="position" />
               <SortHeader label="Chu kỳ cá nhân" sortKey="cycleStartDate" />
-              <SortHeader label="Đã có" sortKey="hours" />
-              <SortHeader label="Yêu cầu" sortKey="requiredHours" />
+              <SortHeader label="Đã ghi nhận" sortKey="hours" />
+              <SortHeader label="Yêu cầu chu kỳ" sortKey="requiredHours" />
               <SortHeader label="Còn thiếu" sortKey="missing" />
               <SortHeader label="Trạng thái" sortKey="trainingStatus" />
+              <th className="pr-5">Cập nhật</th>
             </tr>
           </thead>
           <tbody className="divide-y bg-white">

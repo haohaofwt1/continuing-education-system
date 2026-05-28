@@ -28,7 +28,7 @@ export default function AiAssistantPage() {
     {
       id: "welcome",
       role: "assistant",
-      content: "Tôi có thể trả lời theo dữ liệu nhân sự và chứng chỉ hiện tại: thiếu số tiết, thiếu CCHN, chứng chỉ sắp hết hạn, trạng thái duyệt và tóm tắt báo cáo. Nếu đã cấu hình OpenAI trong Cài đặt hệ thống hoặc .env, câu trả lời sẽ dùng OpenAI; nếu chưa có key, hệ thống dùng bộ phân tích local."
+      content: "Tôi có thể trả lời theo dữ liệu nhân sự và chứng chỉ hiện tại: thiếu số tiết, thiếu CCHN, chứng chỉ sắp hết hạn, trạng thái tự tính tín chỉ và tóm tắt báo cáo. Nếu đã cấu hình OpenAI trong Cài đặt hệ thống hoặc .env, câu trả lời sẽ dùng OpenAI; nếu chưa có key, hệ thống dùng bộ phân tích local."
     }
   ]);
   const [loading, setLoading] = useState(false);

@@ -1,0 +1,77 @@
+export type PortalCertificateData = {
+  id: string;
+  code?: string | null;
+  title: string;
+  holder?: string | null;
+  department?: string | null;
+  position?: string | null;
+  type?: string | null;
+  issuer?: string | null;
+  issuedDate?: string | null;
+  expiredDate?: string | null;
+  hours?: number | null;
+  status?: string | null;
+  tone?: "green" | "yellow" | "red" | "gray" | "blue";
+  ocrStatus?: string | null;
+  confidence?: number | null;
+  thumbnail?: string | null;
+  fileUrl?: string | null;
+  fileName?: string | null;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  rawText?: string | null;
+  certificateNumber?: string | null;
+  holderBirthDate?: string | null;
+  courseContent?: string | null;
+  includeInCycle?: boolean | null;
+  cycleCountedHours?: number | null;
+  cycleReason?: string | null;
+  proposedCredits?: number | null;
+  countedCredits?: number | null;
+  recognizedCredits?: number | null;
+  issueDate?: string | null;
+  cycleStart?: string | null;
+  cycleEnd?: string | null;
+  cycleId?: string | null;
+  calculationStatus?: "counted" | "out_of_cycle" | "needs_info" | "duplicate_suspected" | string | null;
+  calculationReason?: string | null;
+  uploadedBy?: string | null;
+  employeeId?: string | null;
+  isDuplicateSuspected?: boolean | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type PortalOverview = {
+  employee: {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string | null;
+    avatarUrl?: string | null;
+    department: string;
+    position: string;
+    role: string;
+    licenseNumber: string;
+    licenseIssuedAt: string;
+  };
+  compliance: {
+    cycleLabel: string;
+    requiredHours: number;
+    approvedHours: number;
+    missingHours: number;
+    completionRate: number;
+    daysRemaining: number | null;
+    status: string;
+    risk: string;
+    yearlyHours: Record<string, number>;
+  };
+  counts: {
+    total: number;
+    approved: number;
+    pending: number;
+    rejected: number;
+    expiring: number;
+  };
+  certificates: PortalCertificateData[];
+};

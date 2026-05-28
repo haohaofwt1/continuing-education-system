@@ -20,7 +20,7 @@ const defaultPolicy = {
 
 export async function syncApprovedCertificateCredit(certificateId: string, actor?: RequestActor) {
   const certificate = await prisma.certificate.findFirst({
-    where: { id: certificateId, ...tenantWhere(actor) },
+    where: { id: certificateId, ...tenantWhere(actor), deletedAt: null },
     include: { holder: true }
   });
 

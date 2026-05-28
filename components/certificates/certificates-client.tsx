@@ -13,8 +13,8 @@ import { DemoCertificate, downloadCsv } from "@/lib/demo-store";
 import { deleteCertificateFromApi, saveCertificateToApi } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
 
-const quickFilters = ["Chờ duyệt", "Đã duyệt", "Thiếu thông tin", "Sắp hết hạn", "Đã hết hạn", "Nghi trùng", "Không tính chu kỳ", "Không có ảnh"];
-const kanbanColumns = ["Chờ duyệt", "Đã duyệt", "Thiếu thông tin", "Sắp hết hạn", "Đã hết hạn", "Không tính chu kỳ"];
+const quickFilters = ["Được tính", "Không tính", "Cần nhập thêm thông tin", "Nghi trùng lặp", "Sắp hết hạn", "Đã hết hạn", "Không có ảnh"];
+const kanbanColumns = ["Được tính", "Không tính", "Cần nhập thêm thông tin", "Nghi trùng lặp"];
 type ViewMode = "grid" | "list" | "kanban";
 type DrawerMode = "view" | "edit";
 type DateField = "issuedDate" | "studyStartDate" | "expiredDate";
@@ -51,6 +51,8 @@ export function CertificatesClient() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "error">("success");
+  const [canDeleteCertificates, setCanDeleteCertificates] = useState(false);
 
   useEffect(() => {
     fetch("/api/certificates")
@@ -59,10 +61,18 @@ export function CertificatesClient() {
         setItems(Array.isArray(payload.data) ? payload.data : []);
       })
       .catch(() => setItems([]));
+
+    fetch("/api/auth/session")
+      .then((response) => response.ok ? response.json() : null)
+      .then((session: { user?: { permissions?: string[] } } | null) => {
+        setCanDeleteCertificates(Boolean(session?.user?.permissions?.includes("certificates.delete")));
+      })
+      .catch(() => setCanDeleteCertificates(false));
   }, []);
 
   const persist = (next: DemoCertificate[], message: string) => {
     setItems(next);
+    setNoticeTone("success");
     setNotice(message);
   };
 
@@ -111,14 +121,9 @@ export function CertificatesClient() {
     setDrawerMode(mode);
   };
 
-  const approve = async (certificate: DemoCertificate) => {
-    await saveCertificateToApi({ ...certificate, status: "Đã duyệt", tone: "green" }, true);
-    persist(items.map((item) => item.id === certificate.id ? { ...item, status: "Đã duyệt", tone: "green" } : item), "Đã duyệt chứng chỉ.");
-  };
-
   const removeNow = async (certificate: DemoCertificate) => {
     await deleteCertificateFromApi(certificate.id);
-    persist(items.filter((item) => item.id !== certificate.id), "Đã xóa chứng chỉ.");
+    persist(items.filter((item) => item.id !== certificate.id), "Đã xóa mềm chứng chỉ và ghi nhật ký hệ thống.");
     if (selected?.id === certificate.id) setSelected(null);
   };
 
@@ -166,7 +171,7 @@ export function CertificatesClient() {
 
   const bulkUpdateStatus = async (nextStatus: string) => {
     if (!selectedIds.length) return;
-    const nextTone = nextStatus === "Đã duyệt" ? "green" : nextStatus === "Đã hết hạn" ? "red" : nextStatus === "Thiếu thông tin" ? "gray" : "yellow";
+    const nextTone = nextStatus === "Được tính" ? "green" : ["Đã hết hạn", "Không tính"].includes(nextStatus) ? "red" : nextStatus === "Cần nhập thêm thông tin" ? "gray" : "yellow";
     const selected = items.filter((item) => selectedIds.includes(item.id));
     await Promise.all(selected.map((item) => saveCertificateToApi({ ...item, status: nextStatus, tone: nextTone }, true)));
     persist(items.map((item) => selectedIds.includes(item.id) ? { ...item, status: nextStatus, tone: nextTone } : item), `Đã chuyển ${selectedIds.length} chứng chỉ sang "${nextStatus}".`);
@@ -180,20 +185,26 @@ export function CertificatesClient() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === "single") {
-      await removeNow(deleteTarget.certificate);
-      setSelectedIds((ids) => ids.filter((id) => id !== deleteTarget.certificate.id));
-    } else {
-      await Promise.all(deleteTarget.ids.map(deleteCertificateFromApi));
-      persist(items.filter((item) => !deleteTarget.ids.includes(item.id)), `Đã xóa ${deleteTarget.ids.length} chứng chỉ.`);
-      setSelectedIds([]);
+    try {
+      if (deleteTarget.type === "single") {
+        await removeNow(deleteTarget.certificate);
+        setSelectedIds((ids) => ids.filter((id) => id !== deleteTarget.certificate.id));
+      } else {
+        await Promise.all(deleteTarget.ids.map(deleteCertificateFromApi));
+        persist(items.filter((item) => !deleteTarget.ids.includes(item.id)), `Đã xóa mềm ${deleteTarget.ids.length} chứng chỉ và ghi nhật ký hệ thống.`);
+        setSelectedIds([]);
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      setNoticeTone("error");
+      setNotice(error instanceof Error ? error.message : "Chưa xóa được chứng chỉ.");
+      setDeleteTarget(null);
     }
-    setDeleteTarget(null);
   };
 
   const moveToStatus = async (certificateId: string, nextStatus: string) => {
     const target = items.find((item) => item.id === certificateId);
-    const nextTone = nextStatus === "Đã duyệt" ? "green" : nextStatus === "Đã hết hạn" ? "red" : nextStatus === "Thiếu thông tin" ? "gray" : "yellow";
+    const nextTone = nextStatus === "Được tính" ? "green" : ["Đã hết hạn", "Không tính"].includes(nextStatus) ? "red" : nextStatus === "Cần nhập thêm thông tin" ? "gray" : "yellow";
     if (target) await saveCertificateToApi({ ...target, status: nextStatus, tone: nextTone }, true);
     persist(items.map((item) => item.id === certificateId ? { ...item, status: nextStatus, tone: nextTone } : item), `Đã chuyển chứng chỉ sang "${nextStatus}".`);
   };
@@ -207,6 +218,7 @@ export function CertificatesClient() {
     const suffix = scope === "all" ? "tat-ca" : scope === "visible" ? "dang-hien-thi" : selectedIds.length ? "da-chon" : "dang-hien-thi";
     downloadCsv(`chung-chi-${suffix}.csv`, rows);
     setExportOpen(false);
+    setNoticeTone("success");
     setNotice(`Đã export ${rows.length} chứng chỉ${scope === "all" ? " toàn hệ thống" : selectedIds.length && scope === "context" ? " đã chọn" : " đang hiển thị"}.`);
   };
 
@@ -214,8 +226,8 @@ export function CertificatesClient() {
     <>
       <PageHeader
         eyebrow="Quản lý chứng chỉ"
-        title="Upload, OCR và duyệt chứng chỉ"
-        description="Quản lý chứng chỉ, OCR, trạng thái duyệt và số tiết được tính vào chu kỳ đào tạo."
+        title="Kho chứng chỉ toàn bệnh viện"
+        description="Admin theo dõi tín chỉ nhân viên, kho chứng chỉ, trạng thái tự tính và xuất báo cáo. Không có bước xử lý thủ công."
         actions={
           <>
             <div className="relative">
@@ -244,7 +256,11 @@ export function CertificatesClient() {
           </>
         }
       />
-      {notice ? <div className="mb-4 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">{notice}</div> : null}
+      {notice ? (
+        <div className={`mb-4 rounded-2xl p-4 text-sm font-semibold ${noticeTone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+          {notice}
+        </div>
+      ) : null}
       {showWizard ? (
         <CertificateUploadWizard
           onCreate={async (certificate) => {
@@ -257,7 +273,7 @@ export function CertificatesClient() {
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon={<FileSpreadsheet className="h-6 w-6 text-teal-700" />} value={`${items.length}`} label="Tổng chứng chỉ" />
-        <MetricCard icon={<Check className="h-6 w-6 text-emerald-700" />} value={`${items.filter(i => i.status === "Đã duyệt").length}`} label="Đã phê duyệt" />
+        <MetricCard icon={<Check className="h-6 w-6 text-emerald-700" />} value={`${items.filter(i => i.status === "Được tính").length}`} label="Được tính" />
         <MetricCard icon={<CalendarClock className="h-6 w-6 text-amber-700" />} value={`${items.filter(i => i.status === "Sắp hết hạn").length}`} label="Sắp hết hạn" />
         <MetricCard icon={<Search className="h-6 w-6 text-sky-700" />} value={`${filtered.length}`} label="Chứng chỉ đang lọc" />
       </div>
@@ -332,10 +348,11 @@ export function CertificatesClient() {
       {selectedIds.length ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border bg-white p-3 text-sm shadow-sm">
           <span className="font-semibold text-slate-700">Đã chọn {selectedIds.length}</span>
-          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Chờ duyệt")}>Chờ duyệt</Button>
-          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Đã duyệt")}>Duyệt</Button>
-          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Thiếu thông tin")}>Thiếu thông tin</Button>
-          <Button size="sm" variant="destructive" onClick={bulkDelete}>Xóa</Button>
+          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Được tính")}>Được tính</Button>
+          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Không tính")}>Không tính</Button>
+          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Cần nhập thêm thông tin")}>Cần nhập thêm</Button>
+          <Button size="sm" variant="secondary" onClick={() => bulkUpdateStatus("Nghi trùng lặp")}>Nghi trùng lặp</Button>
+          {canDeleteCertificates ? <Button size="sm" variant="destructive" onClick={bulkDelete}>Xóa</Button> : null}
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Bỏ chọn</Button>
         </div>
       ) : null}
@@ -357,8 +374,7 @@ export function CertificatesClient() {
                 certificate={certificate}
                 onView={() => openDrawer(certificate, "view")}
                 onZoom={() => { setZoomed(certificate); setZoom(1); setRotation(0); }}
-                onApprove={() => approve(certificate)}
-                onDelete={() => setDeleteTarget({ type: "single", certificate })}
+                onDelete={canDeleteCertificates ? () => setDeleteTarget({ type: "single", certificate }) : undefined}
                 onDownload={() => downloadCsv(`${certificate.code}.csv`, [certificate])}
                 onEdit={() => openDrawer(certificate, "edit")}
               />
@@ -388,8 +404,7 @@ export function CertificatesClient() {
           }}
           onView={(item) => openDrawer(item, "view")}
           onEdit={(item) => openDrawer(item, "edit")}
-          onApprove={approve}
-          onDelete={(item) => setDeleteTarget({ type: "single", certificate: item })}
+          onDelete={canDeleteCertificates ? (item) => setDeleteTarget({ type: "single", certificate: item }) : undefined}
         />
       ) : null}
 
@@ -529,7 +544,7 @@ function DeleteConfirmDialog({
     ? [target.certificate]
     : certificates.filter((certificate) => target.ids.includes(certificate.id));
   const count = selectedCertificates.length;
-  const approvedCount = selectedCertificates.filter((certificate) => certificate.status === "Đã duyệt").length;
+  const countedCount = selectedCertificates.filter((certificate) => certificate.status === "Được tính").length;
   const title = target.type === "single" ? "Xóa chứng chỉ này?" : `Xóa ${count} chứng chỉ đã chọn?`;
 
   return (
@@ -543,16 +558,16 @@ function DeleteConfirmDialog({
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-slate-950">{title}</h2>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                Thao tác này sẽ xóa dữ liệu chứng chỉ, bao gồm thông tin OCR, trạng thái duyệt và ảnh đính kèm đã lưu.
+                Thao tác này sẽ ẩn chứng chỉ khỏi danh sách, ngừng tính tín chỉ và ghi nhật ký hệ thống. Dữ liệu gốc vẫn được giữ để tra cứu/audit.
               </p>
             </div>
           </div>
         </div>
 
         <div className="space-y-3 p-5">
-          {approvedCount ? (
+          {countedCount ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-800">
-              Có {approvedCount} chứng chỉ đã duyệt. Nên cân nhắc chuyển trạng thái hoặc lưu trữ thay vì xóa nếu đây là dữ liệu thật.
+              Có {countedCount} chứng chỉ đang được tính tín chỉ. Sau khi xóa mềm, tín chỉ liên quan sẽ bị loại khỏi chu kỳ hiện tại.
             </div>
           ) : null}
           <div className="max-h-48 overflow-y-auto rounded-2xl border bg-slate-50">
@@ -567,7 +582,7 @@ function DeleteConfirmDialog({
             ))}
           </div>
           <p className="text-xs leading-5 text-slate-500">
-            Gợi ý: nếu chỉ cần loại khỏi chu kỳ, hãy bấm Hủy rồi sửa chứng chỉ và đổi trạng thái/thông tin thay vì xóa.
+            Chỉ Super Admin hoặc người có quyền xóa chứng chỉ mới thực hiện được thao tác này. Xóa cứng nên dành cho bảo trì dữ liệu hoặc dữ liệu nháp/test.
           </p>
         </div>
 
@@ -625,7 +640,7 @@ function CertificateEditForm({ certificate, onSubmit, onCancel }: { certificate:
   return (
     <form onSubmit={onSubmit} className="space-y-5 pb-4">
       <div className="rounded-2xl border bg-teal-50/40 p-4">
-        <div className="mb-3 text-sm font-semibold text-teal-900">Thông tin kiểm duyệt</div>
+        <div className="mb-3 text-sm font-semibold text-teal-900">Thông tin tự tính tín chỉ</div>
         <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Số giấy chứng nhận"><Input name="certificateNumber" defaultValue={certificate.certificateNumber || certificate.code} /></Field>
         <Field label="Trạng thái">
@@ -702,7 +717,6 @@ function CertificateList({
   onToggleAll,
   onView,
   onEdit,
-  onApprove,
   onDelete
 }: {
   pageCertificates: DemoCertificate[];
@@ -713,8 +727,7 @@ function CertificateList({
   onToggleAll: () => void;
   onView: (item: DemoCertificate) => void;
   onEdit: (item: DemoCertificate) => void;
-  onApprove: (item: DemoCertificate) => void;
-  onDelete: (item: DemoCertificate) => void;
+  onDelete?: (item: DemoCertificate) => void;
 }) {
   const allChecked = pageCertificates.length > 0 && pageCertificates.every((certificate) => selectedIds.includes(certificate.id));
 
@@ -764,8 +777,7 @@ function CertificateList({
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="icon" onClick={() => onView(certificate)}><Eye className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" onClick={() => onEdit(certificate)}><Edit3 className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="icon" onClick={() => onApprove(certificate)}><Check className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="icon" onClick={() => onDelete(certificate)}><Trash2 className="h-4 w-4" /></Button>
+                    {onDelete ? <Button variant="ghost" size="icon" onClick={() => onDelete(certificate)}><Trash2 className="h-4 w-4" /></Button> : null}
                   </div>
                 </td>
               </tr>
@@ -895,9 +907,8 @@ function matchesDate(certificate: DemoCertificate, field: DateField, period: Per
 function applyNaturalFilter(certificate: DemoCertificate, query: string) {
   const lower = query.toLowerCase();
   if (lower.includes("sắp hết hạn")) return certificate.status === "Sắp hết hạn";
-  if (lower.includes("chờ duyệt")) return certificate.status === "Chờ duyệt";
+  if (lower.includes("cần nhập") || lower.includes("thiếu")) return certificate.status === "Cần nhập thêm thông tin";
   if (lower.includes("đã hết hạn")) return certificate.status === "Đã hết hạn";
-  if (lower.includes("thiếu")) return certificate.status === "Thiếu thông tin";
   if (lower.includes("dưới 24")) return certificate.hours < 24;
   if (lower.includes("quý 1") || lower.includes("q1")) return matchesDate(certificate, "issuedDate", "quarter", { month: "", quarter: "2026-Q1", year: "2026", dateFrom: "", dateTo: "" });
   if (lower.includes("tháng 1") || lower.includes("thang 1")) return matchesDate(certificate, "issuedDate", "month", { month: "2026-01", quarter: "", year: "2026", dateFrom: "", dateTo: "" });

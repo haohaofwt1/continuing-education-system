@@ -18,7 +18,7 @@ export async function enqueueCertificateOcr(certificate: Certificate, files: Cer
 
   await prisma.certificate.update({
     where: { id: certificate.id },
-    data: { ocrStatus: "QUEUED", reviewStatus: "PROCESSING" }
+    data: { ocrStatus: "QUEUED" }
   });
 
   return job;
@@ -30,6 +30,7 @@ export async function processOcrJob(jobId: string) {
     include: { certificate: { include: { files: true } } }
   });
   if (!job) throw new Error("OCR_JOB_NOT_FOUND");
+  if (job.certificate.deletedAt) throw new Error("CERTIFICATE_DELETED");
 
   await prisma.ocrJob.update({
     where: { id: jobId },
@@ -42,11 +43,6 @@ export async function processOcrJob(jobId: string) {
     const extracted = normalizeCertificateData(await extractCertificateData(rawText, fileUrl));
     const employeeMatch = await matchEmployeeByName(extracted.holderName);
     const duplicate = await detectDuplicateCertificate(extracted);
-    const nextReviewStatus = duplicate.duplicateSuspected
-      ? "DUPLICATE_SUSPECTED"
-      : extracted.confidence >= 0.75
-        ? "PENDING_CONFIRMATION"
-        : "MISSING_INFO";
 
     await prisma.$transaction([
       prisma.certificateOcrResult.create({
@@ -70,7 +66,6 @@ export async function processOcrJob(jobId: string) {
           certificateCode: extracted.certificateNumber || undefined,
           courseContent: extracted.courseContent || undefined,
           ocrStatus: "SUCCEEDED",
-          reviewStatus: nextReviewStatus,
           confidence: extracted.confidence
         }
       }),
@@ -89,7 +84,7 @@ export async function processOcrJob(jobId: string) {
     await prisma.$transaction([
       prisma.certificate.update({
         where: { id: job.certificateId },
-        data: { ocrStatus: "FAILED", reviewStatus: "OCR_FAILED" }
+        data: { ocrStatus: "FAILED" }
       }),
       prisma.ocrJob.update({
         where: { id: jobId },

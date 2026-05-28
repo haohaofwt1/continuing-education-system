@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { BarChart3, ChevronLeft, ChevronRight, Columns3, Download, FileUp, Grid2X2, ImageUp, List, Plus, Save, Search, Trash2, UserRound, X } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, Columns3, Download, FileUp, Grid2X2, IdCard, ImageUp, List, Plus, Save, Search, Trash2, UserRound, X } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
@@ -223,8 +223,8 @@ export function EmployeesClient() {
     <>
       <PageHeader
         eyebrow="Hồ sơ nhân sự"
-        title="Quản lý nhân sự và CCHN"
-        description="Quản lý hồ sơ nhân sự, khoa/phòng, chức danh, CCHN và trạng thái đào tạo liên tục."
+        title="Danh bạ nhân sự và CCHN"
+        description="Quản lý thông tin nhân sự, khoa/phòng, chức danh, vai trò hệ thống và giấy phép hành nghề. Tín chỉ chỉ hiển thị dạng tóm tắt để đối chiếu nhanh."
         actions={
           <>
             <input
@@ -249,7 +249,7 @@ export function EmployeesClient() {
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon={<UserRound className="h-6 w-6 text-teal-700" />} value={`${items.length}`} label="Tổng nhân sự" />
-        <MetricCard icon={<BarChart3 className="h-6 w-6 text-emerald-700" />} value={`${items.filter(i => i.status === "Hoạt động").length}`} label="Đang hoạt động" />
+        <MetricCard icon={<IdCard className="h-6 w-6 text-emerald-700" />} value={`${items.filter(i => i.licenseNumber).length}`} label="Đã có CCHN" />
         <MetricCard icon={<X className="h-6 w-6 text-amber-700" />} value={`${items.filter(i => !i.licenseNumber).length}`} label="Chưa có CCHN" />
         <MetricCard icon={<Search className="h-6 w-6 text-sky-700" />} value={`${filtered.length}`} label="Nhân sự đang lọc" />
       </div>
@@ -370,7 +370,7 @@ export function EmployeesClient() {
                       </div>
                     </div>
                     <div className="mt-3 text-sm text-slate-600">{employee.department}</div>
-                    <div className="mt-2 text-sm font-semibold">{employee.hours}/{employee.requiredHours} tiết</div>
+                    <div className="mt-2 text-sm font-semibold">CPD: {employee.hours}/{employee.requiredHours} tiết</div>
                   </button>
                 ))}
               </div>
@@ -462,13 +462,13 @@ function EmployeeForm({
           </div>
 
           <div className="rounded-2xl border bg-white p-4">
-            <div className="mb-3 text-sm font-semibold text-slate-900">Số tiết đào tạo liên tục</div>
+            <div className="mb-3 text-sm font-semibold text-slate-900">Tóm tắt CPD trong hồ sơ</div>
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Số tiết đã duyệt trong chu kỳ">
-                <Input name="hours" defaultValue={employee.hours || ""} type="number" min={0} placeholder="Tự tính từ chứng chỉ đã duyệt" />
-                <p className="mt-1.5 text-xs leading-5 text-slate-500">Có thể để trống khi thêm mới. Khi có chứng chỉ đã duyệt, hệ thống sẽ cộng tự động theo ngày tín chỉ và chu kỳ cá nhân.</p>
+              <Field label="Tín chỉ đã ghi nhận">
+                <Input name="hours" defaultValue={employee.hours || ""} type="number" min={0} placeholder="Tự tính từ chứng chỉ được tính" />
+                <p className="mt-1.5 text-xs leading-5 text-slate-500">Có thể để trống khi thêm mới. Khi có chứng chỉ được tính, hệ thống sẽ cộng tự động theo ngày tín chỉ và chu kỳ cá nhân.</p>
               </Field>
-              <Field label="Số tiết yêu cầu theo chức danh">
+              <Field label="Yêu cầu tham chiếu">
                 <Input name="requiredHours" value={requiredHours} onChange={(event) => setRequiredHours(Number(event.target.value))} type="number" min={0} />
                 <p className="mt-1.5 text-xs leading-5 text-slate-500">Tự gợi ý theo chức danh/policy. Với chu kỳ 5 năm có thể dùng 120 tiết và tối thiểu 12 tiết mỗi năm.</p>
               </Field>
@@ -530,7 +530,7 @@ function EmployeeList({
               <SortHeader label="Chức danh" sortKey="position" />
               <SortHeader label="Vai trò" sortKey="role" />
               <SortHeader label="Số CCHN" sortKey="licenseNumber" />
-              <SortHeader label="Số tiết" sortKey="hours" />
+              <SortHeader label="CPD tóm tắt" sortKey="hours" />
               <SortHeader label="Trạng thái" sortKey="status" />
               <th className="pr-5">Thao tác</th>
             </tr>
@@ -544,7 +544,7 @@ function EmployeeList({
                 <td className="px-4">{employee.position}</td>
                 <td className="px-4">{employee.role}</td>
                 <td className="px-4">{employee.licenseNumber || "Chưa cập nhật"}</td>
-                <td className="px-4"><div className="font-semibold">{employee.hours}/{employee.requiredHours}</div><div className="mt-1 h-2 w-24 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-teal-600" style={{ width: `${Math.min((employee.hours / employee.requiredHours) * 100, 100)}%` }} /></div></td>
+                <td className="px-4"><div className="font-semibold">{employee.hours}/{employee.requiredHours}</div><div className="mt-1 h-2 w-24 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-teal-600" style={{ width: `${Math.min((employee.hours / employee.requiredHours) * 100, 100)}%` }} /></div><div className="mt-1 text-[11px] text-slate-400">xem chi tiết ở Chu kỳ CME</div></td>
                 <td className="px-4"><StatusBadge status={employee.status} /></td>
                 <td className="pr-5"><div className="flex gap-1"><Button asChild variant="ghost" size="sm"><Link href={`/employees/${employee.id}`}>Chi tiết</Link></Button><Button variant="ghost" size="sm" onClick={() => onEdit(employee)}>Sửa</Button><Button variant="ghost" size="icon" onClick={() => onDelete(employee)} aria-label="Xóa"><Trash2 className="h-4 w-4" /></Button></div></td>
               </tr>
@@ -578,7 +578,7 @@ function EmployeeCard({ employee, onEdit, onDelete }: { employee: DemoEmployee; 
           <Info label="Khoa/phòng" value={employee.department} />
           <Info label="Chức danh" value={employee.position} />
           <Info label="Số CCHN" value={employee.licenseNumber || "Chưa cập nhật"} />
-          <Info label="Số tiết" value={`${employee.hours}/${employee.requiredHours}`} />
+          <Info label="CPD tóm tắt" value={`${employee.hours}/${employee.requiredHours}`} />
         </div>
         <div className="mt-5 flex justify-between gap-2">
           <Button asChild variant="ghost" size="sm"><Link href={`/employees/${employee.id}`}>Chi tiết</Link></Button>

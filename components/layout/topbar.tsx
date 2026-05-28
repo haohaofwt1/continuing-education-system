@@ -8,11 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getCertificates, getEmployees } from "@/lib/demo-store";
 import { certificates as seedCertificates, employees as seedEmployees } from "@/lib/mock-data";
+import { isEmployeeRole } from "@/lib/roles";
 
 const quickActions = [
+  { label: "Tổng quan cá nhân", href: "/portal", keywords: "portal cá nhân tổng quan cpd", employee: true },
+  { label: "Chứng chỉ của tôi", href: "/portal/certificates", keywords: "chứng chỉ của tôi upload", employee: true },
+  { label: "Thông tin cá nhân", href: "/portal/profile", keywords: "hồ sơ thông tin cá nhân cchn", employee: true },
+  { label: "Discuss", href: "/discuss", keywords: "chat tin nhắn nội bộ trao đổi", employee: true },
   { label: "Tổng quan", href: "/dashboard", keywords: "dashboard tổng quan vận hành" },
   { label: "Hồ sơ nhân sự", href: "/employees", keywords: "nhân sự cchn hồ sơ" },
-  { label: "Chứng chỉ", href: "/certificates", keywords: "chứng chỉ upload ocr duyệt" },
+  { label: "Chứng chỉ", href: "/certificates", keywords: "chứng chỉ upload ocr tự tính tín chỉ" },
   { label: "Đào tạo liên tục", href: "/training", keywords: "chu kỳ số tiết đào tạo" },
   { label: "Báo cáo", href: "/reports", keywords: "báo cáo export thống kê" },
   { label: "Trợ lý AI", href: "/ai-assistant", keywords: "ai chatgpt openai trợ lý" },
@@ -26,8 +31,17 @@ type SearchResult = {
   type: string;
 };
 
-export function Topbar() {
+export function Topbar({
+  initialRole = "",
+  userName,
+  userEmail
+}: {
+  initialRole?: string;
+  userName?: string | null;
+  userEmail?: string | null;
+}) {
   const router = useRouter();
+  const employeeMode = isEmployeeRole(initialRole);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -37,38 +51,39 @@ export function Topbar() {
   const [certificates, setCertificates] = useState(seedCertificates);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
-  const missingHours = employees.filter((employee) => employee.hours < employee.requiredHours);
-  const missingLicense = employees.filter((employee) => !employee.licenseNumber || employee.status === "Thiếu CCHN");
-  const pendingCertificates = certificates.filter((certificate) => certificate.status === "Chờ duyệt");
+  const missingHours = employeeMode ? [] : employees.filter((employee) => employee.hours < employee.requiredHours);
+  const missingLicense = employeeMode ? [] : employees.filter((employee) => !employee.licenseNumber || employee.status === "Thiếu CCHN");
+  const needsInfoCertificates = certificates.filter((certificate) => certificate.status === "Cần nhập thêm thông tin");
   const notifications = [
-    { title: `${pendingCertificates.length} chứng chỉ chờ duyệt`, detail: "Mở danh sách chứng chỉ để xử lý", href: "/certificates", icon: FileCheck2 },
+    { title: `${needsInfoCertificates.length} chứng chỉ cần nhập thêm`, detail: employeeMode ? "Cập nhật chứng chỉ của bạn" : "Mở kho chứng chỉ để rà soát dữ liệu", href: employeeMode ? "/portal/certificates" : "/certificates", icon: FileCheck2 },
     { title: `${missingHours.length} nhân sự thiếu số tiết`, detail: "Kiểm tra tiến độ chu kỳ hiện tại", href: "/training", icon: Bell },
     { title: `${missingLicense.length} hồ sơ thiếu CCHN`, detail: "Cập nhật thông tin hành nghề", href: "/employees", icon: UserRound }
   ].filter((item) => !item.title.startsWith("0 "));
 
   const results = useMemo<SearchResult[]>(() => {
     const normalized = query.trim().toLowerCase();
+    const availableActions = quickActions.filter((item) => employeeMode ? item.employee : !item.employee);
     if (!normalized) {
-      return quickActions.slice(0, 5).map((item) => ({ label: item.label, href: item.href, hint: "Chức năng", type: "Điều hướng" }));
+      return availableActions.slice(0, 5).map((item) => ({ label: item.label, href: item.href, hint: "Chức năng", type: "Điều hướng" }));
     }
-    const employeeResults = employees
+    const employeeResults = employeeMode ? [] : employees
       .filter((employee) => `${employee.name} ${employee.department} ${employee.position} ${employee.licenseNumber}`.toLowerCase().includes(normalized))
       .slice(0, 4)
       .map((employee) => ({ label: employee.name, href: "/employees", hint: `${employee.department} · ${employee.position}`, type: "Nhân sự" }));
     const certificateResults = certificates
       .filter((certificate) => `${certificate.title} ${certificate.holder} ${certificate.code} ${certificate.issuer}`.toLowerCase().includes(normalized))
       .slice(0, 4)
-      .map((certificate) => ({ label: certificate.title, href: "/certificates", hint: `${certificate.holder} · ${certificate.status}`, type: "Chứng chỉ" }));
-    const actionResults = quickActions
+      .map((certificate) => ({ label: certificate.title, href: employeeMode ? "/portal/certificates" : "/certificates", hint: `${certificate.holder} · ${certificate.status}`, type: "Chứng chỉ" }));
+    const actionResults = availableActions
       .filter((item) => `${item.label} ${item.keywords}`.toLowerCase().includes(normalized))
       .map((item) => ({ label: item.label, href: item.href, hint: "Chức năng", type: "Điều hướng" }));
     return [...actionResults, ...employeeResults, ...certificateResults].slice(0, 8);
-  }, [certificates, employees, query]);
+  }, [certificates, employeeMode, employees, query]);
 
   useEffect(() => {
-    setEmployees(getEmployees());
+    if (!employeeMode) setEmployees(getEmployees());
     setCertificates(getCertificates());
-  }, []);
+  }, [employeeMode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -113,14 +128,14 @@ export function Topbar() {
         <Menu className="h-5 w-5" />
       </Button>
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-semibold uppercase tracking-wide text-teal-700">Hệ thống Đào tạo Liên tục</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-teal-700">{employeeMode ? "Portal cá nhân" : "Hệ thống Đào tạo Liên tục"}</div>
         <button
           type="button"
           onClick={() => setSearchOpen(true)}
           className="mt-1 hidden w-full max-w-2xl items-center gap-2 rounded-2xl border bg-white px-3 py-2 text-left shadow-sm transition hover:border-teal-300 md:flex"
         >
           <Search className="h-4 w-4 text-slate-400" />
-          <span className="flex-1 text-sm text-slate-400">Tìm nhân sự, chứng chỉ, báo cáo hoặc chức năng...</span>
+          <span className="flex-1 text-sm text-slate-400">{employeeMode ? "Tìm chứng chỉ hoặc chức năng cá nhân..." : "Tìm nhân sự, chứng chỉ, báo cáo hoặc chức năng..."}</span>
           <span className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs text-slate-500">
             <Command className="h-3 w-3" /> K
           </span>
@@ -160,20 +175,20 @@ export function Topbar() {
             <UserRound className="h-5 w-5" />
           </div>
           <div className="text-left">
-            <div className="text-sm font-semibold text-slate-900">Quản trị hệ thống</div>
-            <div className="text-xs text-slate-500">Super Admin</div>
+            <div className="text-sm font-semibold text-slate-900">{userName ?? (employeeMode ? "Nhân viên" : "Quản trị hệ thống")}</div>
+            <div className="text-xs text-slate-500">{employeeMode ? "Portal cá nhân" : "Super Admin"}</div>
           </div>
         </button>
         {profileOpen ? (
           <div className="absolute right-0 top-14 z-50 w-80 rounded-2xl border bg-white p-3 shadow-2xl">
             <div className="rounded-xl bg-teal-50 p-4">
-              <div className="text-sm font-semibold text-slate-950">Quản trị hệ thống</div>
-              <div className="mt-1 text-xs text-slate-500">admin@example.com</div>
+              <div className="text-sm font-semibold text-slate-950">{userName ?? (employeeMode ? "Nhân viên" : "Quản trị hệ thống")}</div>
+              <div className="mt-1 text-xs text-slate-500">{userEmail ?? (employeeMode ? "" : "admin@example.com")}</div>
             </div>
             <div className="mt-2 grid gap-1">
-              <Link href="/profile" onClick={() => setProfileOpen(false)} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50">Hồ sơ cá nhân</Link>
-              <Link href="/admin/settings" onClick={() => setProfileOpen(false)} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50">Cài đặt hệ thống</Link>
-              <Link href="/admin/accounts" onClick={() => setProfileOpen(false)} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50">Quản lý tài khoản</Link>
+              <Link href={employeeMode ? "/portal/profile" : "/profile"} onClick={() => setProfileOpen(false)} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50">Hồ sơ cá nhân</Link>
+              {!employeeMode ? <Link href="/admin/settings" onClick={() => setProfileOpen(false)} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50">Cài đặt hệ thống</Link> : null}
+              {!employeeMode ? <Link href="/admin/accounts" onClick={() => setProfileOpen(false)} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50">Quản lý tài khoản</Link> : null}
             </div>
           </div>
         ) : null}
@@ -188,7 +203,7 @@ export function Topbar() {
           <div className="mx-auto mt-20 max-w-2xl overflow-hidden rounded-2xl border bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center gap-3 border-b px-4 py-3">
               <Search className="h-5 w-5 text-slate-400" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} autoFocus className="border-0 shadow-none focus:ring-0" placeholder="Tìm nhân sự, chứng chỉ, báo cáo, AI..." />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} autoFocus className="border-0 shadow-none focus:ring-0" placeholder={employeeMode ? "Tìm chứng chỉ hoặc chức năng cá nhân..." : "Tìm nhân sự, chứng chỉ, báo cáo, AI..."} />
               <button type="button" onClick={() => setSearchOpen(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
             <div className="max-h-[420px] overflow-y-auto p-2">

@@ -1,7 +1,9 @@
 import { ConversationType } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { tenantData, tenantWhere } from "@/lib/tenant";
 
 const createThreadSchema = z.object({
   type: z.nativeEnum(ConversationType).default(ConversationType.CHANNEL),
@@ -12,8 +14,16 @@ const createThreadSchema = z.object({
 
 export async function GET() {
   try {
+    const session = await auth();
     await withTimeout(ensureDefaultThreads(), 2000);
     const threads = await withTimeout(prisma.conversation.findMany({
+      where: {
+        ...tenantWhere({ tenantId: session?.user?.tenantId, permissions: [], demoMode: !session?.user }),
+        OR: [
+          { type: ConversationType.CHANNEL },
+          ...(session?.user?.id ? [{ members: { some: { userId: session.user.id } } }] : [])
+        ]
+      },
       orderBy: [{ updatedAt: "desc" }],
       include: {
         members: { include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } } },
@@ -51,11 +61,31 @@ export async function POST(request: Request) {
     const payload = createThreadSchema.parse(await request.json());
     const currentUser = await withTimeout(getCurrentUser(), 2000);
     const memberIds = Array.from(new Set([currentUser?.id, ...(payload.memberIds ?? [])].filter(Boolean))) as string[];
+    if (payload.type === ConversationType.DIRECT && memberIds.length !== 2) {
+      return NextResponse.json({ error: "DIRECT_REQUIRES_EXACTLY_TWO_MEMBERS" }, { status: 400 });
+    }
+    if (payload.type === ConversationType.DIRECT && currentUser) {
+      const directThreads = await withTimeout(prisma.conversation.findMany({
+        where: {
+          ...tenantWhere({ tenantId: currentUser.tenantId, permissions: [], demoMode: false }),
+          type: ConversationType.DIRECT,
+          members: { some: { userId: currentUser.id } }
+        },
+        include: { members: true }
+      }), 2000);
+      const existing = directThreads.find((thread) => {
+        const ids = thread.members.map((member) => member.userId).sort();
+        return ids.length === 2 && ids.join(":") === [...memberIds].sort().join(":");
+      });
+      if (existing) return NextResponse.json({ data: existing }, { status: 200 });
+    }
     const thread = await withTimeout(prisma.conversation.create({
       data: {
+        ...tenantData({ tenantId: currentUser?.tenantId, permissions: [], demoMode: !currentUser }),
         type: payload.type,
-        name: payload.name,
+        name: payload.type === ConversationType.DIRECT ? null : payload.name,
         description: payload.description,
+        isPrivate: payload.type === ConversationType.DIRECT,
         createdById: currentUser?.id,
         members: { create: memberIds.map((userId) => ({ userId })) }
       }
@@ -98,6 +128,8 @@ async function ensureDefaultThreads() {
 }
 
 async function getCurrentUser() {
+  const session = await auth();
+  if (session?.user?.id) return prisma.user.findUnique({ where: { id: session.user.id } });
   return prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
 }
 

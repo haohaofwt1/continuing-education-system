@@ -34,7 +34,7 @@ const reportColumnLabels: Record<string, string> = {
   department: "Khoa/phòng",
   position: "Chức danh",
   licenseNumber: "Số CCHN",
-  approvedHours: "Số tiết đã duyệt",
+  approvedHours: "Số tiết được tính",
   requiredHours: "Số tiết yêu cầu",
   missingHours: "Số tiết còn thiếu",
   compliant: "Trạng thái tuân thủ",

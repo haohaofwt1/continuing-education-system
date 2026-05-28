@@ -12,13 +12,14 @@ export type StoredFile = {
   checksum: string;
 };
 
-export async function putObject(file: File): Promise<StoredFile> {
+export async function putObject(file: File, folder = "certificates"): Promise<StoredFile> {
   assertAllowedUpload(file);
   assertStorageProviderReady();
   const extension = path.extname(file.name).toLowerCase();
-  const safeBaseName = path.basename(file.name, extension).replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 80) || "certificate";
+  const safeBaseName = path.basename(file.name, extension).replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 80) || "upload";
   const storedName = `${Date.now()}-${randomUUID()}-${safeBaseName}${extension}`;
-  const storageKey = `certificates/${storedName}`;
+  const safeFolder = folder.replace(/[^a-zA-Z0-9-_/]+/g, "").replace(/^\/+|\/+$/g, "") || "uploads";
+  const storageKey = `${safeFolder}/${storedName}`;
   const bytes = Buffer.from(await file.arrayBuffer());
   const checksum = createHash("sha256").update(bytes).digest("hex");
   const provider = process.env.STORAGE_PROVIDER || "local";
@@ -27,12 +28,12 @@ export async function putObject(file: File): Promise<StoredFile> {
     return putConfiguredObjectStorage({ file, storageKey, checksum });
   }
 
-  const uploadDir = path.join(process.cwd(), "public", "uploads", "certificates");
+  const uploadDir = path.join(process.cwd(), "public", "uploads", safeFolder);
 
   await mkdir(uploadDir, { recursive: true });
   await writeFile(path.join(uploadDir, storedName), bytes);
 
-  const url = `/uploads/certificates/${storedName}`;
+  const url = `/uploads/${safeFolder}/${storedName}`;
   return {
     fileName: file.name,
     storageKey,

@@ -1,4 +1,4 @@
-import { Check, Download, Edit3, Eye, Trash2 } from "lucide-react";
+import { Download, Edit3, Eye, Trash2 } from "lucide-react";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,7 +17,6 @@ type Certificate = {
 
 export function CertificateCard({
   certificate,
-  onApprove,
   onEdit,
   onDelete,
   onView,
@@ -25,7 +24,6 @@ export function CertificateCard({
   onDownload
 }: {
   certificate: Certificate;
-  onApprove?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onView?: () => void;
@@ -67,8 +65,7 @@ export function CertificateCard({
           <Button variant="ghost" size="icon" aria-label="Xem chi tiết" onClick={onView}><Eye className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" aria-label="Sửa" onClick={onEdit}><Edit3 className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" aria-label="Tải xuống" onClick={onDownload}><Download className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" aria-label="Xóa" onClick={onDelete}><Trash2 className="h-4 w-4" /></Button>
-          <Button variant="secondary" size="icon" aria-label="Duyệt" onClick={onApprove}><Check className="h-4 w-4" /></Button>
+          {onDelete ? <Button variant="ghost" size="icon" aria-label="Xóa" onClick={onDelete}><Trash2 className="h-4 w-4" /></Button> : null}
         </div>
       </CardContent>
     </Card>

@@ -102,16 +102,16 @@ async function main() {
 
   const positions = await Promise.all(
     [
-      ["Bac si", 48],
-      ["Duoc si", 48],
-      ["Dieu duong", 48],
-      ["Ky thuat vien", 36],
-      ["Nu ho sinh", 48],
-      ["Y si", 36]
+      ["Bac si", 120],
+      ["Duoc si", 120],
+      ["Dieu duong", 120],
+      ["Ky thuat vien", 120],
+      ["Nu ho sinh", 120],
+      ["Y si", 120]
     ].map(([name, requiredHours]) =>
       prisma.position.upsert({
         where: { name: String(name) },
-        update: {},
+        update: { requiredHours: Number(requiredHours) },
         create: { tenantId: tenant.id, name: String(name), requiredHours: Number(requiredHours) }
       })
     )
@@ -143,7 +143,7 @@ async function main() {
   const passwordHash = await bcrypt.hash(process.env.SUPER_ADMIN_PASSWORD || "ChangeMe123!", 12);
   const admin = await prisma.user.upsert({
     where: { email: process.env.SUPER_ADMIN_EMAIL || "admin@example.com" },
-    update: {},
+    update: { passwordHash },
     create: {
       name: "Quan tri he thong",
       tenantId: tenant.id,
@@ -174,13 +174,14 @@ async function main() {
     names.map((name, index) =>
       prisma.user.upsert({
         where: { email: `user${index + 1}@example.com` },
-        update: {},
+        update: { passwordHash },
         create: {
           name,
           tenantId: tenant.id,
           username: `user${index + 1}`,
           email: `user${index + 1}@example.com`,
           phone: `09000000${index}`,
+          passwordHash,
           departmentId: departments[index % departments.length].id,
           positionId: positions[index % positions.length].id,
           roleId: index % 4 === 0 ? reviewerRole.id : employeeRole.id,

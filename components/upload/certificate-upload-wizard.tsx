@@ -40,9 +40,11 @@ const fallbackExtracted = {
   confidence: 0.1
 };
 
-export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate: DemoCertificate) => void }) {
+export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate: DemoCertificate) => void | Promise<void> }) {
   const [step, setStep] = useState<Step>(1);
   const [processing, setProcessing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [extracted, setExtracted] = useState(fallbackExtracted);
   const [rawText, setRawText] = useState("");
   const [preview, setPreview] = useState("/placeholder-certificate.svg");
@@ -88,6 +90,7 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setStep(2);
     setProcessing(true);
+    setSubmitError("");
     const first = acceptedFiles[0];
     setUploadedFile(null);
     setPreview("/placeholder-certificate.svg");
@@ -146,7 +149,7 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
       </CardHeader>
       <CardContent>
         <div className="mb-6 grid gap-2 sm:grid-cols-3">
-          {["Upload", "AI/OCR đọc dữ liệu", "Xác nhận"].map((label, index) => (
+        {["Upload", "AI/OCR đọc dữ liệu", "Tự động tính tín chỉ"].map((label, index) => (
             <div key={label} className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${step >= index + 1 ? "bg-teal-600 text-white" : "bg-white text-slate-500"}`}>
               Bước {index + 1}: {label}
             </div>
@@ -204,8 +207,8 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
               className="grid gap-4"
               onSubmit={(event) => {
                 event.preventDefault();
+                setSubmitError("");
                 const formData = new FormData(event.currentTarget);
-                const action = String(formData.get("action"));
                 const includeInCycle = cycleAssessment.includeInCycle;
                 const certificate: DemoCertificate = {
                   id: `c${Date.now()}`,
@@ -219,8 +222,8 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                   issuedDate: String(formData.get("issuedDate") ?? ""),
                   expiredDate: String(formData.get("expiredDate") ?? "") || null,
                   hours: Number(formData.get("hours") ?? 0),
-                  status: includeInCycle ? (action === "approve" ? "Đã duyệt" : "Chờ duyệt") : "Không tính chu kỳ",
-                  tone: includeInCycle ? (action === "approve" ? "green" : "yellow") : "gray",
+                  status: includeInCycle ? "Được tính" : "Không tính",
+                  tone: includeInCycle ? "green" : "gray",
                   ocrStatus: "Đã đọc",
                   confidence: extracted.confidence,
                   thumbnail: uploadedFile?.thumbnailUrl || uploadedFile?.url || preview,
@@ -244,11 +247,20 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                   cycleCountedHours: includeInCycle ? Number(formData.get("hours") ?? 0) : 0,
                   cycleReason: cycleAssessment.reason
                 };
-                onCreate?.(certificate);
-                setPreview("/placeholder-certificate.svg");
-                setRotation(0);
-                setUploadedFile(null);
-                setStep(1);
+                void (async () => {
+                  setSaving(true);
+                  try {
+                    await onCreate?.(certificate);
+                    setPreview("/placeholder-certificate.svg");
+                    setRotation(0);
+                    setUploadedFile(null);
+                    setStep(1);
+                  } catch {
+                    setSubmitError("Chưa lưu được chứng chỉ. Kiểm tra người được cấp, mã chứng chỉ hoặc kết nối database rồi thử lại.");
+                  } finally {
+                    setSaving(false);
+                  }
+                })();
               }}
             >
               <div className="grid gap-3 sm:grid-cols-2">
@@ -330,10 +342,9 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                 </div>
               </div>
 
+              {submitError ? <div className="rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">{submitError}</div> : null}
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" type="submit" name="action" value="draft">Lưu nháp</Button>
-                <Button type="submit" name="action" value="review"><CheckCircle2 className="h-4 w-4" />Gửi duyệt</Button>
-                <Button type="submit" name="action" value="approve">Lưu và duyệt</Button>
+                <Button type="submit" name="action" value="save" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Lưu & cập nhật tín chỉ</Button>
               </div>
             </form>
           </div>

@@ -1,10 +1,12 @@
 import { auth } from "@/lib/auth";
 import { PermissionKey, can } from "@/lib/permissions";
+import { isEmployeeRole } from "@/lib/roles";
 
 export type RequestActor = {
   id?: string;
   tenantId?: string | null;
   email?: string | null;
+  role?: string;
   permissions: string[];
   demoMode: boolean;
 };
@@ -15,6 +17,7 @@ export async function requirePermission(permission: PermissionKey): Promise<Requ
     id: session?.user?.id,
     tenantId: session?.user?.tenantId,
     email: session?.user?.email,
+    role: session?.user?.role,
     permissions: session?.user?.permissions ?? [],
     demoMode: !session?.user
   };
@@ -32,4 +35,8 @@ export async function requirePermission(permission: PermissionKey): Promise<Requ
     status: 403,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+export function isEmployeeActor(actor: RequestActor) {
+  return isEmployeeRole(actor.role);
 }

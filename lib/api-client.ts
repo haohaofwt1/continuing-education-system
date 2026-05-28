@@ -22,12 +22,18 @@ export async function saveCertificateToApi(certificate: DemoCertificate, exists:
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(certificate)
   });
-  if (!response.ok) throw new Error("CERTIFICATE_API_SAVE_FAILED");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string; detail?: string } | null;
+    throw new Error(payload?.detail || payload?.error || "CERTIFICATE_API_SAVE_FAILED");
+  }
   const payload = (await response.json()) as { data: DemoCertificate };
   return payload.data;
 }
 
 export async function deleteCertificateFromApi(id: string) {
   const response = await fetch(`/api/certificates/${id}`, { method: "DELETE" });
-  if (!response.ok) throw new Error("CERTIFICATE_API_DELETE_FAILED");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string; detail?: string } | null;
+    throw new Error(payload?.detail || payload?.error || "CERTIFICATE_API_DELETE_FAILED");
+  }
 }

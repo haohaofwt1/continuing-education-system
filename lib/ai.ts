@@ -143,10 +143,10 @@ function answerFromLocalData(question: string, context: AssistantContext) {
   }
 
   if (lower.includes("báo cáo")) {
-    const approved = certificates.filter((certificate) => certificate.status === "Đã duyệt").length;
-    const pending = certificates.filter((certificate) => certificate.status === "Chờ duyệt").length;
-    const missingInfo = certificates.filter((certificate) => certificate.status === "Thiếu thông tin").length;
-    return `Tóm tắt nhanh: ${employees.length} nhân sự, ${certificates.length} chứng chỉ, ${approved} đã duyệt, ${pending} chờ duyệt, ${missingInfo} thiếu thông tin.`;
+    const counted = certificates.filter((certificate) => certificate.status === "Được tính").length;
+    const notCounted = certificates.filter((certificate) => certificate.status === "Không tính").length;
+    const missingInfo = certificates.filter((certificate) => certificate.status === "Cần nhập thêm thông tin").length;
+    return `Tóm tắt nhanh: ${employees.length} nhân sự, ${certificates.length} chứng chỉ, ${counted} được tính, ${notCounted} không tính, ${missingInfo} cần nhập thêm thông tin.`;
   }
 
   return `Tôi đã nhận câu hỏi. Dữ liệu hiện có gồm ${employees.length} nhân sự và ${certificates.length} chứng chỉ. Bạn có thể hỏi về người thiếu số tiết, thiếu CCHN, chứng chỉ sắp hết hạn hoặc yêu cầu tóm tắt báo cáo.`;

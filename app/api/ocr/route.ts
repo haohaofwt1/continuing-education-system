@@ -22,7 +22,7 @@ export async function POST(request: Request) {
 
     if (body.certificateId) {
       const certificate = await prisma.certificate.findFirst({
-        where: { id: body.certificateId, ...tenantWhere(actor) },
+        where: { id: body.certificateId, ...tenantWhere(actor), deletedAt: null },
         include: { files: true }
       });
       if (!certificate) return NextResponse.json({ error: "CERTIFICATE_NOT_FOUND" }, { status: 404 });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { permissions } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
-import { requirePermission } from "@/lib/server-permissions";
+import { isEmployeeActor, requirePermission } from "@/lib/server-permissions";
 import { tenantWhere } from "@/lib/tenant";
 import { uploadCertificateFiles } from "@/lib/upload";
 
@@ -16,7 +16,14 @@ export async function POST(request: Request) {
     const uploaded = await uploadCertificateFiles(files);
 
     if (certificateId) {
-      const certificate = await prisma.certificate.findFirst({ where: { id: certificateId, ...tenantWhere(actor) } });
+      const certificate = await prisma.certificate.findFirst({
+        where: {
+          id: certificateId,
+          deletedAt: null,
+          ...tenantWhere(actor),
+          ...(isEmployeeActor(actor) && actor.id ? { holderId: actor.id } : {})
+        }
+      });
       if (!certificate) return NextResponse.json({ error: "CERTIFICATE_NOT_FOUND" }, { status: 404 });
       await prisma.certificateFile.createMany({
         data: uploaded.map((file) => ({

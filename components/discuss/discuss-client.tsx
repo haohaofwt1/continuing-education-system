@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Bell, ChevronDown, Hash, Inbox, MessageCircle, Paperclip, Pin, Plus, Search, Send, Smile, Star, UsersRound, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bell, ChevronDown, FileText, Hash, Inbox, MessageCircle, Paperclip, Pin, Plus, Search, Send, Smile, Star, UsersRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getEmployees } from "@/lib/demo-store";
 
 type ThreadType = "channel" | "direct";
+type ThreadPanel = "channel" | "direct";
 type Thread = {
   id: string;
   type: ThreadType;
@@ -24,6 +25,14 @@ type ChatMessage = {
   body: string;
   at: string;
   mine?: boolean;
+  attachments?: MessageAttachment[];
+};
+type MessageAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
 };
 type ApiThread = {
   id: string;
@@ -37,7 +46,17 @@ type ApiMessage = {
   conversationId: string;
   author: string;
   body: string;
+  attachments?: MessageAttachment[];
   createdAt: string;
+  mine?: boolean;
+};
+type DirectoryUser = {
+  id: string;
+  name: string;
+  email?: string;
+  department?: string;
+  position?: string;
+  avatarUrl?: string | null;
 };
 
 const channels: Thread[] = [
@@ -48,7 +67,7 @@ const channels: Thread[] = [
 ];
 
 const seedMessages: ChatMessage[] = [
-  { id: "m1", threadId: "all", author: "Quản trị hệ thống", body: "Nhắc các khoa/phòng rà soát chứng chỉ chờ duyệt trong tuần này.", at: "08:30" },
+  { id: "m1", threadId: "all", author: "Quản trị hệ thống", body: "Nhắc các khoa/phòng rà soát chứng chỉ cần nhập thêm thông tin trong tuần này.", at: "08:30" },
   { id: "m2", threadId: "all", author: "Nguyễn Văn An", body: "Phòng khám đã bổ sung xong danh sách nhân sự thiếu số tiết.", at: "08:42" },
   { id: "m3", threadId: "training", author: "Trần Thị Bình", body: "Có thể gửi lại link upload chứng chỉ cho nhóm kỹ thuật viên không?", at: "09:05" },
   { id: "m4", threadId: "admins", author: "Quản trị hệ thống", body: "API OCR đang dùng adapter mock, chưa gọi provider thật.", at: "09:20" }
@@ -90,8 +109,9 @@ function apiMessageToChatMessage(message: ApiMessage): ChatMessage {
     threadId: message.conversationId,
     author: message.author,
     body: message.body,
+    attachments: message.attachments ?? [],
     at: new Date(message.createdAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-    mine: false
+    mine: Boolean(message.mine)
   };
 }
 
@@ -109,6 +129,7 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutM
 }
 
 export function DiscussClient() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const employees = useMemo(() => getEmployees(), []);
   const directThreads = useMemo<Thread[]>(() => employees.slice(0, 10).map((employee, index) => ({
     id: `dm-${employee.id}`,
@@ -126,14 +147,40 @@ export function DiscussClient() {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(() => readMessages());
   const [draft, setDraft] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [directOpen, setDirectOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<ThreadPanel>("channel");
+  const [directoryUsers, setDirectoryUsers] = useState<DirectoryUser[]>(() => employees.map((employee) => ({
+    id: employee.id,
+    name: employee.name,
+    email: employee.email,
+    department: employee.department,
+    position: employee.position,
+    avatarUrl: employee.avatarUrl
+  })));
   const [storageMode, setStorageMode] = useState<"database" | "demo">("demo");
   const [lastSyncedAt, setLastSyncedAt] = useState("");
-  const [databaseUnavailable, setDatabaseUnavailable] = useState(false);
 
   const activeThread = threads.find((thread) => thread.id === activeId) ?? threads[0];
-  const visibleThreads = threads.filter((thread) => !query || `${thread.name} ${thread.description}`.toLowerCase().includes(query.toLowerCase()));
+  const visibleThreads = threads.filter((thread) => thread.type === activePanel && (!query || `${thread.name} ${thread.description}`.toLowerCase().includes(query.toLowerCase())));
   const activeMessages = messages.filter((message) => message.threadId === activeThread.id);
+
+  useEffect(() => {
+    if (threads.some((thread) => thread.id === activeId && thread.type === activePanel)) return;
+    const next = threads.find((thread) => thread.type === activePanel);
+    if (next) setActiveId(next.id);
+  }, [activeId, activePanel, threads]);
+
+  useEffect(() => {
+    fetchWithTimeout("/api/discuss/users", undefined, 2500)
+      .then((response) => response.ok ? response.json() : { data: [] })
+      .then((payload: { data?: DirectoryUser[] }) => {
+        if (Array.isArray(payload.data) && payload.data.length) setDirectoryUsers(payload.data);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     setLocalThreads((current) => {
@@ -147,7 +194,6 @@ export function DiscussClient() {
   useEffect(() => {
     let cancelled = false;
     async function loadThreads() {
-      if (databaseUnavailable) return;
       try {
         const response = await fetchWithTimeout("/api/discuss/threads", undefined, 2500);
         if (!response.ok) throw new Error("threads unavailable");
@@ -164,13 +210,12 @@ export function DiscussClient() {
         } satisfies Thread));
         if (!cancelled && nextThreads.length) {
           setServerThreads(nextThreads);
-          setActiveId((current) => nextThreads.some((thread) => thread.id === current) ? current : nextThreads[0].id);
+          setActiveId((current) => nextThreads.some((thread) => thread.id === current) ? current : nextThreads.find((thread) => thread.type === activePanel)?.id ?? nextThreads[0].id);
           setStorageMode("database");
         }
       } catch {
         if (!cancelled) {
           setStorageMode("demo");
-          setDatabaseUnavailable(true);
         }
       }
     }
@@ -180,10 +225,10 @@ export function DiscussClient() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [databaseUnavailable]);
+  }, [activePanel]);
 
   useEffect(() => {
-    if (!activeThread?.persisted || databaseUnavailable) return;
+    if (!activeThread?.persisted) return;
     let cancelled = false;
     async function loadMessages() {
       try {
@@ -197,11 +242,11 @@ export function DiscussClient() {
             return [...current.filter((message) => message.threadId !== activeThread.id), ...nextMessages, ...optimisticMine];
           });
           setLastSyncedAt(new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }));
+          setStorageMode("database");
         }
       } catch {
         if (!cancelled) {
           setStorageMode("demo");
-          setDatabaseUnavailable(true);
         }
       }
     }
@@ -211,7 +256,7 @@ export function DiscussClient() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeThread?.id, activeThread?.persisted, databaseUnavailable]);
+  }, [activeThread?.id, activeThread?.persisted]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
@@ -226,7 +271,8 @@ export function DiscussClient() {
 
   const send = async () => {
     const body = draft.trim();
-    if (!body) return;
+    if ((!body && !selectedFiles.length) || sending) return;
+    setSending(true);
 
     if (activeThread.persisted) {
       const optimistic: ChatMessage = {
@@ -234,17 +280,25 @@ export function DiscussClient() {
         threadId: activeThread.id,
         author: "Bạn",
         body,
+        attachments: selectedFiles.map((file, index) => ({
+          id: `local-${Date.now()}-${index}`,
+          fileName: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          url: URL.createObjectURL(file)
+        })),
         at: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
         mine: true
       };
       setMessages((current) => [...current, optimistic]);
       setDraft("");
+      setSelectedFiles([]);
       try {
-        const response = await fetchWithTimeout("/api/discuss/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversationId: activeThread.id, body })
-        }, 2500);
+        const formData = new FormData();
+        formData.append("conversationId", activeThread.id);
+        formData.append("body", body);
+        selectedFiles.forEach((file) => formData.append("files", file));
+        const response = await fetchWithTimeout("/api/discuss/messages", { method: "POST", body: formData }, 8000);
         if (!response.ok) throw new Error("send failed");
         const payload = await response.json();
         const saved = payload.data as ApiMessage;
@@ -253,16 +307,17 @@ export function DiscussClient() {
           threadId: saved.conversationId,
           author: "Bạn",
           body: saved.body,
+          attachments: saved.attachments ?? [],
           at: new Date(saved.createdAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
           mine: true
         };
         setMessages((current) => current.map((message) => message.id === optimistic.id ? savedMessage : message));
         broadcastMessage(savedMessage);
         setStorageMode("database");
+        setSending(false);
         return;
       } catch {
         setStorageMode("demo");
-        setDatabaseUnavailable(true);
       }
     }
 
@@ -271,6 +326,13 @@ export function DiscussClient() {
       threadId: activeThread.id,
       author: "Bạn",
       body,
+      attachments: selectedFiles.map((file, index) => ({
+        id: `local-${Date.now()}-${index}`,
+        fileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        url: URL.createObjectURL(file)
+      })),
       at: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
       mine: true
     }];
@@ -278,16 +340,57 @@ export function DiscussClient() {
     saveMessages(next);
     broadcastMessage(next[next.length - 1]);
     setDraft("");
+    setSelectedFiles([]);
+    setSending(false);
   };
 
-  const createChannel = (payload: { name: string; description: string; memberIds: string[] }) => {
+  const createThread = async (payload: { type: ThreadType; name: string; description: string; memberIds: string[] }) => {
+    {
+      try {
+        const response = await fetchWithTimeout("/api/discuss/threads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: payload.type === "channel" ? "CHANNEL" : "DIRECT",
+            name: payload.name,
+            description: payload.description,
+            memberIds: payload.memberIds
+          })
+        }, 2500);
+        if (!response.ok) throw new Error("create thread failed");
+        const saved = await response.json() as { data: { id: string } };
+        const selectedUser = directoryUsers.find((user) => payload.memberIds.includes(user.id));
+        const thread: Thread = {
+          id: saved.data.id,
+          type: payload.type,
+          name: payload.type === "direct" ? selectedUser?.name ?? payload.name : payload.name,
+          description: payload.type === "direct" ? selectedUser?.position ?? selectedUser?.email ?? "Tin nhắn trực tiếp" : payload.description || "Kênh trao đổi nội bộ",
+          unread: 0,
+          online: payload.type === "direct" ? true : undefined,
+          persisted: true,
+          memberCount: payload.type === "direct" ? 2 : payload.memberIds.length + 1
+        };
+        setServerThreads((current) => current.some((item) => item.id === thread.id) ? current : [thread, ...current]);
+        setStorageMode("database");
+        setActivePanel(payload.type);
+        setActiveId(saved.data.id);
+        setCreateOpen(false);
+        setDirectOpen(false);
+        return;
+      } catch {
+        setStorageMode("demo");
+      }
+    }
+
+    const selectedUser = directoryUsers.find((user) => payload.memberIds.includes(user.id));
     const thread: Thread = {
-      id: `ch-${Date.now()}`,
-      type: "channel",
-      name: payload.name,
-      description: payload.description || "Kênh trao đổi nội bộ",
+      id: `${payload.type === "channel" ? "ch" : "dm"}-${Date.now()}`,
+      type: payload.type,
+      name: payload.type === "direct" ? selectedUser?.name ?? payload.name : payload.name,
+      description: payload.type === "direct" ? selectedUser?.position ?? selectedUser?.email ?? "Tin nhắn trực tiếp" : payload.description || "Kênh trao đổi nội bộ",
       unread: 0,
-      memberCount: payload.memberIds.length + 1
+      online: payload.type === "direct" ? true : undefined,
+      memberCount: payload.type === "direct" ? 2 : payload.memberIds.length + 1
     };
     const nextThreads = [...localThreads, thread];
     setLocalThreads(nextThreads);
@@ -296,14 +399,16 @@ export function DiscussClient() {
       id: `m-${Date.now()}`,
       threadId: thread.id,
       author: "Hệ thống",
-      body: `Đã tạo kênh ${thread.name}. Thành viên có thể trao đổi, ghim thông tin và theo dõi công việc tại đây.`,
+      body: payload.type === "direct" ? `Đã mở tin nhắn trực tiếp với ${thread.name}.` : `Đã tạo kênh ${thread.name}. Thành viên có thể trao đổi, ghim thông tin và theo dõi công việc tại đây.`,
       at: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
     };
     const nextMessages = [...messages, welcome];
     setMessages(nextMessages);
     saveMessages(nextMessages);
+    setActivePanel(payload.type);
     setActiveId(thread.id);
     setCreateOpen(false);
+    setDirectOpen(false);
   };
 
   return (
@@ -314,9 +419,13 @@ export function DiscussClient() {
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-600 text-white"><MessageCircle className="h-5 w-5" /></div>
             <div className="min-w-0 flex-1">
               <div className="font-bold text-slate-950">Discuss</div>
-              <div className="text-xs text-slate-500">Tin nhắn nội bộ · {storageMode === "database" ? `Realtime ${lastSyncedAt || "sync"}` : "Demo fallback"}</div>
+              <div className="text-xs text-slate-500">Tin nhắn nội bộ · {storageMode === "database" ? `Đã đồng bộ ${lastSyncedAt || ""}` : "Chế độ offline"}</div>
             </div>
-            <Button size="icon" variant="secondary" aria-label="Tạo channel" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /></Button>
+            <Button size="icon" variant="secondary" aria-label={activePanel === "channel" ? "Tạo channel" : "Tạo direct message"} onClick={() => activePanel === "channel" ? setCreateOpen(true) : setDirectOpen(true)}><Plus className="h-4 w-4" /></Button>
+          </div>
+          <div className="mt-3 grid grid-cols-2 rounded-2xl border bg-slate-50 p-1">
+            <button type="button" onClick={() => setActivePanel("channel")} className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${activePanel === "channel" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>Channels</button>
+            <button type="button" onClick={() => setActivePanel("direct")} className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${activePanel === "direct" ? "bg-white text-teal-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>Direct</button>
           </div>
           <div className="relative mt-3">
             <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -325,16 +434,25 @@ export function DiscussClient() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 scrollbar-thin">
+          {activePanel === "channel" ? (
           <ThreadSection title="Channels" action={<button type="button" onClick={() => setCreateOpen(true)} className="rounded-lg px-2 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-50">Tạo</button>}>
-            {visibleThreads.filter((thread) => thread.type === "channel").map((thread) => (
+            {visibleThreads.map((thread) => (
               <ThreadButton key={thread.id} thread={thread} active={thread.id === activeId} onClick={() => setActiveId(thread.id)} />
             ))}
           </ThreadSection>
-          <ThreadSection title="Direct messages">
-            {visibleThreads.filter((thread) => thread.type === "direct").map((thread) => (
+          ) : (
+          <ThreadSection title="Direct messages" action={<button type="button" onClick={() => setDirectOpen(true)} className="rounded-lg px-2 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-50">Chọn người</button>}>
+            {visibleThreads.map((thread) => (
               <ThreadButton key={thread.id} thread={thread} active={thread.id === activeId} onClick={() => setActiveId(thread.id)} />
             ))}
+            {!visibleThreads.length ? (
+              <button type="button" onClick={() => setDirectOpen(true)} className="mt-2 w-full rounded-2xl border border-dashed bg-white p-4 text-left text-sm text-slate-500 transition hover:border-teal-300 hover:bg-teal-50">
+                <div className="font-semibold text-slate-800">Chọn người để chat</div>
+                <div className="mt-1 text-xs">Tạo hội thoại trực tiếp với nhân viên hoặc quản trị viên.</div>
+              </button>
+            ) : null}
           </ThreadSection>
+          )}
         </div>
       </aside>
 
@@ -363,7 +481,7 @@ export function DiscussClient() {
                   <div className="mt-3 font-semibold text-slate-950">Chưa có tin nhắn trong {activeThread.name}</div>
                   <p className="mt-1 max-w-md text-sm leading-6 text-slate-500">Bắt đầu trao đổi, phân công người xử lý hoặc gửi nhắc hồ sơ trong khung bên dưới.</p>
                   <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    {["Nhắc rà soát chứng chỉ chờ duyệt", "Ai phụ trách cập nhật CCHN?", "Tổng hợp việc cần xử lý hôm nay"].map((item) => (
+                    {["Nhắc rà soát chứng chỉ cần nhập thêm", "Ai phụ trách cập nhật CCHN?", "Tổng hợp việc cần xử lý hôm nay"].map((item) => (
                       <button key={item} type="button" onClick={() => setDraft(item)} className="rounded-full border px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-teal-300 hover:bg-teal-50">{item}</button>
                     ))}
                   </div>
@@ -374,8 +492,34 @@ export function DiscussClient() {
         </div>
 
         <footer className="border-t bg-white p-4">
-          <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border bg-white p-2 shadow-sm">
-            <Button variant="ghost" size="icon" aria-label="Attach"><Paperclip className="h-4 w-4" /></Button>
+          <div className="mx-auto max-w-3xl rounded-2xl border bg-white p-2 shadow-sm">
+            {selectedFiles.length ? (
+              <div className="mb-2 flex flex-wrap gap-2 px-1">
+                {selectedFiles.map((file) => (
+                  <span key={`${file.name}-${file.size}`} className="inline-flex max-w-full items-center gap-2 rounded-xl border bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-700">
+                    <FileText className="h-3.5 w-3.5 flex-none text-teal-700" />
+                    <span className="max-w-48 truncate">{file.name}</span>
+                    <button type="button" onClick={() => setSelectedFiles((items) => items.filter((item) => item !== file))} className="rounded-md p-0.5 text-slate-400 hover:bg-white hover:text-slate-700" aria-label={`Bỏ ${file.name}`}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              className="hidden"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                setSelectedFiles((items) => [...items, ...files].slice(0, 5));
+                event.target.value = "";
+              }}
+            />
+            <Button variant="ghost" size="icon" aria-label="Attach" onClick={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" /></Button>
             <textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -389,7 +533,8 @@ export function DiscussClient() {
               className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none"
             />
             <Button variant="ghost" size="icon" aria-label="Emoji"><Smile className="h-4 w-4" /></Button>
-            <Button onClick={send} size="icon" aria-label="Send"><Send className="h-4 w-4" /></Button>
+            <Button onClick={send} size="icon" aria-label="Send" disabled={sending || (!draft.trim() && !selectedFiles.length)}><Send className="h-4 w-4" /></Button>
+            </div>
           </div>
         </footer>
       </section>
@@ -408,15 +553,16 @@ export function DiscussClient() {
         <div className="space-y-3 p-4 text-sm">
           <InfoRow label="Loại" value={activeThread.type === "channel" ? "Kênh nội bộ" : "Tin nhắn trực tiếp"} />
           <InfoRow label="Thành viên" value={activeThread.type === "channel" ? `${activeThread.memberCount ?? employees.length + 1} người` : "2 người"} />
-          <InfoRow label="Lưu trữ" value={storageMode === "database" ? "PostgreSQL / Prisma" : "localStorage fallback"} />
-          <InfoRow label="Realtime" value={storageMode === "database" ? "Polling 2.5s + BroadcastChannel" : "Local tab sync"} />
+          <InfoRow label="Lưu trữ" value={storageMode === "database" ? "PostgreSQL / Prisma" : "Thiết bị hiện tại"} />
+          <InfoRow label="Trạng thái" value={storageMode === "database" ? "Đã kết nối dữ liệu" : "Offline fallback"} />
           <div className="rounded-2xl border bg-teal-50 p-3 text-teal-900">
-            Module này đã có schema và API database. Bước thương mại tiếp theo là realtime WebSocket/Supabase Realtime, read receipt và file attachment.
+            Tin nhắn dùng chung cho admin và portal nhân viên. Hệ thống đã ghi nhận đọc tin nhắn; file đính kèm sẽ hiển thị trong cùng luồng khi bật upload nội bộ.
           </div>
         </div>
       </aside>
 
-      {createOpen ? <CreateChannelDialog employees={employees} onCancel={() => setCreateOpen(false)} onCreate={createChannel} /> : null}
+      {createOpen ? <CreateChannelDialog employees={employees} onCancel={() => setCreateOpen(false)} onCreate={(payload) => createThread({ type: "channel", ...payload })} /> : null}
+      {directOpen ? <CreateDirectDialog users={directoryUsers} onCancel={() => setDirectOpen(false)} onCreate={(user) => createThread({ type: "direct", name: user.name, description: user.position || user.email || "Tin nhắn trực tiếp", memberIds: [user.id] })} /> : null}
     </div>
   );
 }
@@ -470,10 +616,32 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <span className="font-semibold">{message.author}</span>
           <span>{message.at}</span>
         </div>
-        <div className="text-sm leading-6">{message.body}</div>
+        {message.body ? <div className="text-sm leading-6">{message.body}</div> : null}
+        {message.attachments?.length ? (
+          <div className="mt-2 space-y-2">
+            {message.attachments.map((attachment) => (
+              <a
+                key={attachment.id}
+                href={attachment.url}
+                target="_blank"
+                rel="noreferrer"
+                className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${message.mine ? "bg-white/15 text-white hover:bg-white/25" : "bg-slate-50 text-slate-700 hover:bg-slate-100"}`}
+              >
+                <FileText className="h-4 w-4 flex-none" />
+                <span className="min-w-0 flex-1 truncate">{attachment.fileName}</span>
+                <span className={message.mine ? "text-teal-50" : "text-slate-400"}>{formatFileSize(attachment.sizeBytes)}</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (sizeBytes < 1024 * 1024) return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -500,7 +668,7 @@ function CreateChannelDialog({
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div>
             <div className="text-lg font-bold text-slate-950">Tạo channel mới</div>
-            <p className="mt-1 text-sm text-slate-500">Tạo kênh theo khoa/phòng, dự án, nhóm duyệt chứng chỉ hoặc chiến dịch nhắc hồ sơ.</p>
+            <p className="mt-1 text-sm text-slate-500">Tạo kênh theo khoa/phòng, dự án, nhóm rà soát dữ liệu chứng chỉ hoặc chiến dịch nhắc hồ sơ.</p>
           </div>
           <button type="button" onClick={onCancel} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
         </div>
@@ -508,7 +676,7 @@ function CreateChannelDialog({
           <div className="space-y-4">
             <label>
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tên channel</span>
-              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ví dụ: Khoa Dược, Duyệt chứng chỉ, Chu kỳ 2026" autoFocus />
+              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ví dụ: Khoa Dược, Tự động tính tín chỉ, Chu kỳ 2026" autoFocus />
             </label>
             <label>
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Mô tả</span>
@@ -537,6 +705,54 @@ function CreateChannelDialog({
         <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-4">
           <Button variant="secondary" onClick={onCancel}>Hủy</Button>
           <Button onClick={() => name.trim() && onCreate({ name: name.trim(), description: description.trim(), memberIds })} disabled={!name.trim()}><Plus className="h-4 w-4" />Tạo channel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateDirectDialog({
+  users,
+  onCancel,
+  onCreate
+}: {
+  users: DirectoryUser[];
+  onCancel: () => void;
+  onCreate: (user: DirectoryUser) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = users.filter((user) => `${user.name} ${user.email ?? ""} ${user.department ?? ""} ${user.position ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onClick={onCancel}>
+      <div className="w-full max-w-xl overflow-hidden rounded-3xl border bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <div className="text-lg font-bold text-slate-950">Tạo direct message</div>
+            <p className="mt-1 text-sm text-slate-500">Chọn một thành viên để mở hội thoại riêng.</p>
+          </div>
+          <button type="button" onClick={onCancel} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="p-5">
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-10 pl-9" placeholder="Tìm theo tên, email, khoa/phòng..." autoFocus />
+          </div>
+          <div className="mt-4 max-h-96 overflow-y-auto rounded-2xl border p-2 scrollbar-thin">
+            {filtered.map((user) => (
+              <button key={user.id} type="button" onClick={() => onCreate(user)} className="mb-1 flex w-full items-center gap-3 rounded-xl p-3 text-left transition last:mb-0 hover:bg-teal-50">
+                <Avatar name={user.name} online />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-slate-950">{user.name}</span>
+                  <span className="block truncate text-xs text-slate-500">{[user.department, user.position, user.email].filter(Boolean).join(" · ")}</span>
+                </span>
+                <span className="rounded-full border px-3 py-1 text-xs font-semibold text-teal-700">Chat</span>
+              </button>
+            ))}
+            {!filtered.length ? (
+              <div className="p-6 text-center text-sm text-slate-500">Không tìm thấy thành viên phù hợp.</div>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

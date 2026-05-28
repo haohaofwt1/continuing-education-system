@@ -19,7 +19,7 @@ export default async function VerifyCertificatePage({ params }: { params: Promis
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="text-2xl font-bold text-slate-950">{certificate.title}</div>
-          <div><StatusBadge status={certificate.status === "Đã duyệt" ? "Hợp lệ" : certificate.status} /></div>
+          <div><StatusBadge status={certificate.status === "Được tính" ? "Hợp lệ" : certificate.status} /></div>
           {[
             ["Người sở hữu", certificate.holder],
             ["Ngày cấp", formatDate(certificate.issuedDate)],

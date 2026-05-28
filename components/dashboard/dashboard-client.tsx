@@ -34,7 +34,7 @@ export function DashboardClient() {
   const cycleCertificates = certificates.filter((certificate) => isInCycle(certificate.issuedDate));
   const missingHours = employees.filter((employee) => employee.hours < employee.requiredHours);
   const missingLicense = employees.filter((employee) => !employee.licenseNumber || employee.status === "Thiếu CCHN");
-  const pendingCertificates = certificates.filter((certificate) => certificate.status === "Chờ duyệt");
+  const needsInfoCertificates = certificates.filter((certificate) => certificate.status === "Cần nhập thêm thông tin");
   const expiringCertificates = certificates.filter(isExpiringSoon);
   const totalRequiredHours = employees.reduce((sum, employee) => sum + employee.requiredHours, 0);
   const totalHours = employees.reduce((sum, employee) => sum + employee.hours, 0);
@@ -47,12 +47,12 @@ export function DashboardClient() {
     hours: employees.filter((employee) => employee.department === department).reduce((sum, employee) => sum + employee.hours, 0)
   }));
   const attentionCertificates = [
-    ...pendingCertificates,
+    ...needsInfoCertificates,
     ...expiringCertificates,
-    ...certificates.filter((certificate) => certificate.status === "Thiếu thông tin")
+    ...certificates.filter((certificate) => certificate.status === "Nghi trùng lặp")
   ].filter(uniqueCertificate).slice(0, 6);
   const workItems = [
-    { label: "Chứng chỉ đang chờ duyệt", value: pendingCertificates.length, href: "/certificates" },
+    { label: "Chứng chỉ cần nhập thêm", value: needsInfoCertificates.length, href: "/certificates" },
     { label: "Nhân sự thiếu số tiết", value: missingHours.length, href: "/employees" },
     { label: "Hồ sơ thiếu số CCHN", value: missingLicense.length, href: "/employees" },
     { label: "Chứng chỉ sắp hết hạn", value: expiringCertificates.length, href: "/certificates" }
@@ -82,7 +82,7 @@ export function DashboardClient() {
       <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="Thiếu số tiết" value={`${missingHours.length} người`} hint="Cần nhắc bổ sung" icon={AlertTriangle} />
         <MetricCard title="Sắp hết hạn" value={`${expiringCertificates.length} chứng chỉ`} hint="Trong 60 ngày tới" icon={FileClock} />
-        <MetricCard title="Chờ duyệt" value={`${pendingCertificates.length} chứng chỉ`} hint="Ưu tiên xử lý hôm nay" icon={ClipboardCheck} />
+        <MetricCard title="Cần nhập thêm" value={`${needsInfoCertificates.length} chứng chỉ`} hint="Thiếu dữ liệu để tự tính" icon={ClipboardCheck} />
         <MetricCard title="Thiếu số CCHN" value={`${missingLicense.length} hồ sơ`} hint="Cần cập nhật dữ liệu" icon={Users} />
       </div>
 

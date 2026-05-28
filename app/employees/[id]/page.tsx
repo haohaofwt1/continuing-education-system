@@ -155,7 +155,7 @@ export default function EmployeeDetailPage() {
               <div className="h-3 rounded-full bg-teal-600" style={{ width: `${progress}%` }} />
             </div>
             <div className="mt-3 text-xs text-slate-500">
-              Số tiết được tính theo chứng chỉ đã duyệt và ngày tín chỉ nằm trong chu kỳ tuân thủ của nhân sự.
+              Số tiết được tính theo chứng chỉ được hệ thống ghi nhận và ngày tín chỉ nằm trong chu kỳ tuân thủ của nhân sự.
             </div>
           </CardContent>
         </Card>

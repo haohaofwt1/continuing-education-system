@@ -41,6 +41,7 @@ export async function buildExpiringCertificateReport(actor?: RequestActor, days 
   const certificates = await prisma.certificate.findMany({
     where: {
       ...tenantWhere(actor),
+      deletedAt: null,
       expiredDate: { gte: now, lte: until }
     },
     include: { holder: true, department: true, certificateType: true },

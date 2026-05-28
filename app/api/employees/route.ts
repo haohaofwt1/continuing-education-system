@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { writeAuditLog } from "@/lib/audit";
 import { mapEmployee, toAccountStatus } from "@/lib/api-mappers";
@@ -75,6 +76,7 @@ async function upsertEmployee(payload: z.infer<typeof employeeSchema>) {
   ]);
   const activeCycle = await prisma.trainingCycle.findFirst({ where: { isActive: true }, orderBy: { startYear: "desc" } });
   const username = payload.username || payload.email.split("@")[0];
+  const defaultPasswordHash = await bcrypt.hash(process.env.DEFAULT_USER_PASSWORD || process.env.SUPER_ADMIN_PASSWORD || "ChangeMe123!", 12);
   const data = {
     name: payload.name,
     username,
@@ -90,16 +92,16 @@ async function upsertEmployee(payload: z.infer<typeof employeeSchema>) {
   };
 
   const user = payload.id
-    ? await prisma.user.upsert({
+      ? await prisma.user.upsert({
         where: { id: payload.id },
         update: data,
-        create: { id: payload.id, ...data },
+        create: { id: payload.id, ...data, passwordHash: defaultPasswordHash },
         include: { department: true, position: true, role: true, summaries: { orderBy: { updatedAt: "desc" }, take: 1 } }
       })
     : await prisma.user.upsert({
         where: { email: payload.email },
         update: data,
-        create: data,
+        create: { ...data, passwordHash: defaultPasswordHash },
         include: { department: true, position: true, role: true, summaries: { orderBy: { updatedAt: "desc" }, take: 1 } }
       });
 
@@ -148,6 +150,17 @@ async function findOrCreatePosition(name?: string | null, requiredHours = 48) {
 }
 
 async function findOrCreateRole(name?: string | null) {
-  const value = name?.trim() || "Nhan vien";
-  return prisma.role.upsert({ where: { name: value }, update: {}, create: { name: value } });
+  const value = name?.trim() === "Nhân viên" ? "Nhan vien" : name?.trim() || "Nhan vien";
+  const permissionKeys = value === "Nhan vien" ? ["certificates.view", "certificates.create"] : [];
+  const permissions = permissionKeys.length
+    ? await prisma.permission.findMany({ where: { key: { in: permissionKeys } } })
+    : [];
+  return prisma.role.upsert({
+    where: { name: value },
+    update: permissions.length ? { permissions: { connect: permissions.map((permission) => ({ id: permission.id })) } } : {},
+    create: {
+      name: value,
+      permissions: permissions.length ? { connect: permissions.map((permission) => ({ id: permission.id })) } : undefined
+    }
+  });
 }
