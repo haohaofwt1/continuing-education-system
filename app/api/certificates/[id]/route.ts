@@ -43,7 +43,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const actor = await requirePermission(permissions.createCertificate);
     const { id } = await params;
     const payload = patchSchema.parse(await request.json());
-    const before = await prisma.certificate.findFirst({ where: { id, ...tenantWhere(actor), deletedAt: null }, include });
+    const before = await prisma.certificate.findFirst({ where: { id, ...tenantWhere(actor) }, include });
     if (!before) return NextResponse.json({ error: "CERTIFICATE_NOT_FOUND" }, { status: 404 });
 
     const [holder, department, position, certificateType] = await Promise.all([
@@ -118,14 +118,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     rateLimit(request, "certificates:delete", 20);
     const actor = await requirePermission(permissions.deleteCertificate);
     const { id } = await params;
-    const before = await prisma.certificate.findFirst({ where: { id, ...tenantWhere(actor), deletedAt: null } });
+    const before = await prisma.certificate.findFirst({ where: { id, ...tenantWhere(actor) } });
     if (!before) return NextResponse.json({ ok: true });
-    const deletedAt = new Date();
     await removeCreditRecordsForCertificate(id, actor);
     const updated = await prisma.certificate.update({
       where: { id },
       data: {
-        deletedAt,
         includeInCycle: false,
         reviewStatus: "REJECTED",
         notes: appendSoftDeleteNote(before.notes, actor.email)
@@ -137,7 +135,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       entityType: "Certificate",
       entityId: id,
       before,
-      after: { deletedAt: deletedAt.toISOString(), includeInCycle: false, reviewStatus: updated.reviewStatus },
+      after: { includeInCycle: false, reviewStatus: updated.reviewStatus },
       request
     });
     return NextResponse.json({ ok: true });
