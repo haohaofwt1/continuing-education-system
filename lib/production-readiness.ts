@@ -1,3 +1,4 @@
+import { isDemoFallbackEnabled } from "@/lib/demo-mode";
 import { prisma } from "@/lib/prisma";
 import { getServerAiSettings } from "@/lib/server-ai-settings";
 
@@ -58,17 +59,17 @@ function checkStorage(): ReadinessCheck {
       detail: "STORAGE_PROVIDER is local. Use Vercel Blob, R2, S3 or Supabase Storage for production."
     };
   }
-  if (provider === "vercel_blob" && !process.env.BLOB_READ_WRITE_TOKEN) {
-    return { key: "storage", label: "File storage", status: "fail", detail: "BLOB_READ_WRITE_TOKEN is required for Vercel Blob." };
-  }
   if (provider === "r2" && (!process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET)) {
     return { key: "storage", label: "File storage", status: "fail", detail: "R2 storage variables are incomplete." };
   }
-  if (provider === "supabase" && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+  if (provider === "supabase" && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.SUPABASE_STORAGE_BUCKET)) {
     return { key: "storage", label: "File storage", status: "fail", detail: "Supabase storage variables are incomplete." };
   }
-  if (provider !== "supabase") {
-    return { key: "storage", label: "File storage", status: "warn", detail: `${provider} is configured, but only the Supabase upload adapter is implemented in this build.` };
+  if (provider === "vercel_blob" && !process.env.BLOB_READ_WRITE_TOKEN) {
+    return { key: "storage", label: "File storage", status: "warn", detail: "BLOB_READ_WRITE_TOKEN is not set. Uploads rely on Vercel Blob runtime auth." };
+  }
+  if (provider === "vercel_blob") {
+    return { key: "storage", label: "File storage", status: "pass", detail: "Vercel Blob is configured." };
   }
   return { key: "storage", label: "File storage", status: "pass", detail: `${provider} is configured.` };
 }
@@ -117,7 +118,7 @@ function checkRealtime(): ReadinessCheck {
 }
 
 function checkDemoFallback(): ReadinessCheck {
-  if (process.env.NEXT_PUBLIC_DEMO_FALLBACK === "false") {
+  if (!isDemoFallbackEnabled()) {
     return { key: "demo", label: "Demo fallback", status: "pass", detail: "Demo fallback is disabled for production." };
   }
   return { key: "demo", label: "Demo fallback", status: "warn", detail: "Demo fallback is enabled. Disable it before commercial launch." };

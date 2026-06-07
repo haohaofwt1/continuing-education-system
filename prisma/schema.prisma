@@ -353,7 +353,7 @@ model Certificate {
   issuedDate            DateTime?
   expiredDate           DateTime?
   creditHours           Float                   @default(0)
-  certificateCode       String?                 @unique
+  certificateCode       String?
   courseContent         String?
   fileUrl               String?
   thumbnailUrl          String?
@@ -383,6 +383,7 @@ model Certificate {
   reviewEvents          CertificateReviewEvent[]
   creditRecords         CreditRecord[]
 
+  @@unique([tenantId, certificateCode])
   @@index([holderId, reviewStatus])
   @@index([tenantId, reviewStatus])
   @@index([tenantId, deletedAt])

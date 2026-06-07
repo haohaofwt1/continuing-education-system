@@ -1,5 +1,16 @@
 import type { DemoEmployee, DemoCertificate } from "@/lib/demo-store";
 
+type ApiErrorPayload = {
+  error?: string;
+  detail?: string;
+  message?: string;
+};
+
+export async function readApiError(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
+  return payload?.detail || payload?.message || payload?.error || fallback;
+}
+
 export async function saveEmployeeToApi(employee: DemoEmployee, exists: boolean) {
   const response = await fetch(exists ? `/api/employees/${employee.id}` : "/api/employees", {
     method: exists ? "PATCH" : "POST",

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ jobId: job.id, status: job.status });
     }
 
-    const fileContext = body.fileUrl || body.fileName || "/placeholder-certificate.svg";
+    const fileContext = [body.fileUrl, body.fileName].filter(Boolean).join(" ") || "/placeholder-certificate.svg";
     const rawText = await extractTextFromImage(fileContext);
     const extracted = normalizeCertificateData(await extractCertificateData(rawText, fileContext));
     const employeeMatch = await matchEmployeeByName(extracted.holderName);

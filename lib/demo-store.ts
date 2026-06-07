@@ -1,6 +1,7 @@
 "use client";
 
 import { certificates as seedCertificates, employees as seedEmployees } from "@/lib/mock-data";
+import { isDemoFallbackEnabled } from "@/lib/demo-mode";
 
 export type DemoEmployee = (typeof seedEmployees)[number] & {
   avatarUrl?: string;
@@ -66,18 +67,22 @@ function writeJson<T>(key: string, value: T) {
 }
 
 export function getEmployees() {
+  if (!isDemoFallbackEnabled()) return [];
   return readJson<DemoEmployee[]>(employeeKey, seedEmployees);
 }
 
 export function saveEmployees(items: DemoEmployee[]) {
+  if (!isDemoFallbackEnabled()) return;
   writeJson(employeeKey, items);
 }
 
 export function getCertificates() {
+  if (!isDemoFallbackEnabled()) return [];
   return readJson<DemoCertificate[]>(certificateKey, seedCertificates);
 }
 
 export function saveCertificates(items: DemoCertificate[]) {
+  if (!isDemoFallbackEnabled()) return;
   writeJson(certificateKey, items);
 }
 

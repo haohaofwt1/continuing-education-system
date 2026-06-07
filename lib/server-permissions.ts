@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { isDemoFallbackEnabled } from "@/lib/demo-mode";
 import { PermissionKey, can } from "@/lib/permissions";
 import { isEmployeeRole } from "@/lib/roles";
 
@@ -22,7 +23,7 @@ export async function requirePermission(permission: PermissionKey): Promise<Requ
     demoMode: !session?.user
   };
 
-  if (actor.demoMode && process.env.NEXT_PUBLIC_DEMO_FALLBACK !== "false") return actor;
+  if (actor.demoMode && isDemoFallbackEnabled()) return actor;
   if (actor.demoMode) {
     throw new Response(JSON.stringify({ error: "UNAUTHORIZED" }), {
       status: 401,

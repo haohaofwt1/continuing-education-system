@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { readApiError } from "@/lib/api-client";
 import { cn, formatDate } from "@/lib/utils";
 import type { PortalCertificateData, PortalOverview } from "@/components/portal/portal-types";
 
@@ -128,6 +129,7 @@ export function PortalCertificatesClient() {
   const [uploadedEvidence, setUploadedEvidence] = useState<UploadedEvidence | null>(null);
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [ocrMessage, setOcrMessage] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error">("success");
@@ -314,12 +316,14 @@ export function PortalCertificatesClient() {
     setUploadOpen(true);
     setNotice("");
     setNoticeTone("success");
+    setUploadError("");
   };
 
   const handleEvidenceFile = async (file: File | null) => {
     updateDraft("file", file);
     setUploadedEvidence(null);
     setOcrMessage("");
+    setUploadError("");
     if (!file) return;
     if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type)) {
       updateDraft("file", null);
@@ -334,12 +338,23 @@ export function PortalCertificatesClient() {
 
     setOcrProcessing(true);
     try {
+      let storedFile: UploadedEvidence | undefined;
       const formData = new FormData();
       formData.append("files", file);
-      const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
-      const uploadPayload = await uploadResponse.json();
-      if (!uploadResponse.ok) throw new Error("UPLOAD_FAILED");
-      const storedFile = uploadPayload.files?.[0] as UploadedEvidence | undefined;
+      try {
+        const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
+        const uploadPayload = await uploadResponse.clone().json().catch(() => null) as { files?: UploadedEvidence[] } | null;
+        if (!uploadResponse.ok) {
+          throw new Error(await readApiError(uploadResponse, "UPLOAD_FAILED"));
+        }
+        storedFile = uploadPayload?.files?.[0] ?? undefined;
+        setUploadError("");
+      } catch (error) {
+        storedFile = undefined;
+        const message = error instanceof Error ? error.message : "UPLOAD_FAILED";
+        setUploadError(message);
+        setOcrMessage(`Tải tệp thất bại: ${message}. Hệ thống sẽ vẫn đọc OCR từ dữ liệu tạm.`);
+      }
       setUploadedEvidence(storedFile ?? null);
 
       const ocrResponse = await fetch("/api/ocr", {
@@ -347,8 +362,10 @@ export function PortalCertificatesClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileName: file.name, fileUrl: storedFile?.url ?? null })
       });
-      const ocrPayload = await ocrResponse.json();
-      if (!ocrResponse.ok || !ocrPayload.extracted) throw new Error("OCR_FAILED");
+      const ocrPayload = await ocrResponse.clone().json().catch(() => null) as { extracted?: unknown } | null;
+      if (!ocrResponse.ok || !ocrPayload?.extracted) {
+        throw new Error(await readApiError(ocrResponse, "OCR_FAILED"));
+      }
       const extracted = ocrPayload.extracted as {
         certificateNumber?: string | null;
         certificateTitle?: string | null;
@@ -359,7 +376,18 @@ export function PortalCertificatesClient() {
         certificateType?: string | null;
         creditHours?: number | null;
         courseContent?: string | null;
+        confidence?: number | null;
       };
+      const hasReadableData = Boolean(
+        extracted.holderName ||
+        extracted.issuedDate ||
+        extracted.certificateNumber ||
+        extracted.issuingOrganization ||
+        (typeof extracted.creditHours === "number" && extracted.creditHours > 0)
+      );
+      if (!hasReadableData || (typeof extracted.confidence === "number" && extracted.confidence < 0.3)) {
+        throw new Error("OCR_LOW_CONFIDENCE");
+      }
 
       setUploadDraft((current) => ({
         ...current,
@@ -375,8 +403,14 @@ export function PortalCertificatesClient() {
         courseContent: extracted.courseContent || current.courseContent
       }));
       setOcrMessage("Đã đọc thông tin từ ảnh. Bạn kiểm tra lại ở bước tiếp theo trước khi lưu.");
-    } catch {
-      setOcrMessage("Chưa đọc được thông tin từ ảnh này. Bạn có thể nhập tay hoặc thử file rõ hơn.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "OCR_FAILED";
+      if (message !== "OCR_LOW_CONFIDENCE") {
+        setUploadError((current) => current || message);
+      }
+      setOcrMessage(message === "OCR_LOW_CONFIDENCE"
+        ? "OCR đọc được nhưng độ tin cậy thấp. Bạn có thể nhập tay hoặc thử file rõ hơn."
+        : `Chưa đọc được thông tin từ ảnh này: ${message}`);
     } finally {
       setOcrProcessing(false);
     }
@@ -405,13 +439,6 @@ export function PortalCertificatesClient() {
     try {
       if (uploadedEvidence) {
         uploaded = { url: uploadedEvidence.url, thumbnailUrl: uploadedEvidence.thumbnailUrl };
-      } else if (uploadDraft.file) {
-        const formData = new FormData();
-        formData.append("files", uploadDraft.file);
-        const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
-        const uploadPayload = await uploadResponse.json();
-        if (!uploadResponse.ok) throw new Error("UPLOAD_FAILED");
-        uploaded = uploadPayload.files?.[0] ?? null;
       }
 
       const response = await fetch("/api/certificates", {
@@ -433,18 +460,23 @@ export function PortalCertificatesClient() {
           thumbnail: uploaded?.thumbnailUrl ?? uploaded?.url ?? null
         })
       });
-      if (!response.ok) throw new Error("CREATE_FAILED");
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string; detail?: string } | null;
+        throw new Error(payload?.detail || payload?.error || "CREATE_FAILED");
+      }
       setUploadOpen(false);
       setUploadDraft(initialDraft);
       setUploadedEvidence(null);
       setOcrMessage("");
       setUploadStep(1);
       setNoticeTone("success");
-      setNotice("Đã lưu chứng chỉ. Hệ thống đã tự kiểm tra theo chu kỳ và cập nhật tín chỉ nếu được tính.");
+      setNotice(uploadError
+        ? `Đã lưu chứng chỉ, nhưng tệp đính kèm chưa được lưu: ${uploadError}`
+        : "Đã lưu chứng chỉ. Hệ thống đã tự kiểm tra theo chu kỳ và cập nhật tín chỉ nếu được tính.");
       await load();
-    } catch {
+    } catch (error) {
       setNoticeTone("error");
-      setNotice("Chưa lưu được chứng chỉ vào database. Vui lòng kiểm tra kết nối hệ thống rồi thử lại.");
+      setNotice(error instanceof Error ? error.message : "Chưa lưu được chứng chỉ vào database. Vui lòng kiểm tra kết nối hệ thống rồi thử lại.");
     } finally {
       setSaving(false);
     }

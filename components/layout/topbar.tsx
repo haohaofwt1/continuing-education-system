@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CheckCircle2, Command, FileCheck2, LogOut, Menu, Search, UserRound, X } from "lucide-react";
@@ -122,6 +123,11 @@ export function Topbar({
     setQuery("");
   };
 
+  const handleLogout = async () => {
+    setLogoutOpen(false);
+    await signOut({ callbackUrl: "/login", redirect: true });
+  };
+
   return (
     <header className="sticky top-0 z-30 flex h-20 items-center gap-4 border-b bg-white/82 px-4 backdrop-blur-xl lg:px-8">
       <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Mở menu">
@@ -226,10 +232,10 @@ export function Topbar({
           <div className="w-full max-w-md rounded-2xl border bg-white p-5 shadow-2xl">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-600"><LogOut className="h-6 w-6" /></div>
             <div className="mt-4 text-lg font-bold text-slate-950">Đăng xuất khỏi hệ thống?</div>
-            <p className="mt-2 text-sm leading-6 text-slate-500">Phiên demo sẽ chuyển về màn hình đăng nhập. Dữ liệu demo đang lưu trên trình duyệt vẫn được giữ lại.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-500">Phiên đăng nhập hiện tại sẽ kết thúc và chuyển về màn hình đăng nhập.</p>
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setLogoutOpen(false)}>Hủy</Button>
-              <Button onClick={() => router.push("/login")}><CheckCircle2 className="h-4 w-4" />Đăng xuất</Button>
+              <Button onClick={handleLogout}><CheckCircle2 className="h-4 w-4" />Đăng xuất</Button>
             </div>
           </div>
         </div>

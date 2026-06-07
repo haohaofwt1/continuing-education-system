@@ -203,7 +203,12 @@ async function main() {
   await Promise.all(
     users.slice(0, 8).map((user, index) =>
       prisma.certificate.upsert({
-        where: { certificateCode: `CERT-${2026}-${index + 1}` },
+        where: {
+          tenantId_certificateCode: {
+            tenantId: tenant.id,
+            certificateCode: `CERT-${2026}-${index + 1}`
+          }
+        },
         update: {},
         create: {
           title: index % 2 === 0 ? "Kiem soat nhiem khuan co ban" : "Dao tao lien tuc cap nhat chuyen mon",
@@ -263,22 +268,25 @@ async function main() {
     }
   });
 
-  await prisma.notification.createMany({
-    data: [
-      {
-        userId: admin.id,
-        type: "MISSING_HOURS",
-        title: "15 nguoi thieu so tiet",
-        message: "Can ra soat nhan su chua dat chu ky 2025-2026."
-      },
-      {
-        userId: admin.id,
-        type: "CERTIFICATE_EXPIRING",
-        title: "8 chung chi sap het han",
-        message: "Co chung chi het han trong 60 ngay toi."
-      }
-    ]
-  });
+  for (const notification of [
+    {
+      userId: admin.id,
+      type: "MISSING_HOURS" as const,
+      title: "15 nguoi thieu so tiet",
+      message: "Can ra soat nhan su chua dat chu ky 2025-2026."
+    },
+    {
+      userId: admin.id,
+      type: "CERTIFICATE_EXPIRING" as const,
+      title: "8 chung chi sap het han",
+      message: "Co chung chi het han trong 60 ngay toi."
+    }
+  ]) {
+    const exists = await prisma.notification.findFirst({
+      where: { userId: notification.userId, type: notification.type, title: notification.title }
+    });
+    if (!exists) await prisma.notification.create({ data: notification });
+  }
 
   const discussUsers = [admin, ...users].slice(0, 12);
   for (const channel of [

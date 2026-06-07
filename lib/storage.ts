@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { createHash, randomUUID } from "crypto";
+import { put as putBlob } from "@vercel/blob";
 
 export type StoredFile = {
   fileName: string;
@@ -47,6 +48,10 @@ export async function putObject(file: File, folder = "certificates"): Promise<St
 
 export async function getSignedUrl(storageKeyOrUrl: string, expiresInSeconds = 900) {
   if (storageKeyOrUrl.startsWith("/")) return storageKeyOrUrl;
+  if (storageKeyOrUrl.startsWith("http")) return storageKeyOrUrl;
+  if ((process.env.STORAGE_PROVIDER || "local") === "vercel_blob") {
+    return storageKeyOrUrl;
+  }
   if ((process.env.STORAGE_PROVIDER || "local") === "supabase") {
     const signed = await createSupabaseSignedUrl(storageKeyOrUrl, expiresInSeconds);
     if (signed) return signed;
@@ -71,7 +76,7 @@ function assertStorageProviderReady() {
   if (provider === "supabase" && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.SUPABASE_STORAGE_BUCKET)) {
     throw new Error("Supabase Storage is not configured");
   }
-  if (provider !== "local" && provider !== "supabase") {
+  if (provider !== "local" && provider !== "supabase" && provider !== "vercel_blob") {
     throw new Error(`${provider} storage adapter is not implemented yet`);
   }
 }
@@ -89,8 +94,36 @@ async function putConfiguredObjectStorage({
   if (provider === "supabase") {
     return putSupabaseObject({ file, storageKey, checksum });
   }
+  if (provider === "vercel_blob") {
+    return putVercelBlobObject({ file, storageKey, checksum });
+  }
 
   throw new Error(`${provider} storage adapter is not implemented yet`);
+}
+
+async function putVercelBlobObject({
+  file,
+  storageKey,
+  checksum
+}: {
+  file: File;
+  storageKey: string;
+  checksum: string;
+}): Promise<StoredFile> {
+  const blob = await putBlob(storageKey, file, {
+    access: "public",
+    addRandomSuffix: false
+  });
+
+  return {
+    fileName: file.name,
+    storageKey,
+    url: blob.url,
+    thumbnailUrl: file.type.startsWith("image/") ? blob.url : "/placeholder-certificate.svg",
+    sizeBytes: file.size,
+    mimeType: file.type,
+    checksum
+  };
 }
 
 async function putSupabaseObject({

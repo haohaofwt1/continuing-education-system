@@ -119,7 +119,7 @@ async function upsertCertificate(payload: z.infer<typeof certificateSchema>, act
         hours: payload.hours
       }, trainingCycle)
     : { includeInCycle: true };
-  const requiredFieldsMissing = !payload.title?.trim() || !payload.issuer?.trim() || !payload.issuedDate || !certificateCode || !Number(payload.hours || 0) || !payload.fileUrl || !identity.ok || !cyclePrerequisite.ok;
+  const requiredFieldsMissing = !payload.title?.trim() || !payload.issuer?.trim() || !payload.issuedDate || !certificateCode || !Number(payload.hours || 0) || !identity.ok || !cyclePrerequisite.ok;
   const includeInCycle = cyclePrerequisite.ok ? payload.includeInCycle ?? isIssueDateInEmployeeCycle(payload.issuedDate, holder?.licenseIssuedAt) ?? cycleAssessment.includeInCycle : false;
   const calculatedStatus = requiredFieldsMissing
     ? "MISSING_INFO" as const
@@ -167,9 +167,14 @@ async function upsertCertificate(payload: z.infer<typeof certificateSchema>, act
     });
   }
 
-  if (certificateCode && !duplicate) {
+  if (certificateCode && !duplicate && actor.tenantId) {
     return prisma.certificate.upsert({
-      where: { certificateCode },
+      where: {
+        tenantId_certificateCode: {
+          tenantId: actor.tenantId,
+          certificateCode
+        }
+      },
       update: data,
       create: data,
       include
@@ -186,7 +191,7 @@ async function detectDuplicateCertificate(certificateCode: string | undefined, p
       ...tenantWhere(actor),
       ...(payload.id ? { NOT: { id: payload.id } } : {}),
       OR: [
-        ...(certificateCode ? [{ certificateCode }] : []),
+        ...(certificateCode ? [{ certificateCode, ...tenantWhere(actor) }] : []),
         {
           title: { equals: payload.title, mode: "insensitive" },
           holderId: isEmployeeActor(actor) && actor.id ? actor.id : undefined,

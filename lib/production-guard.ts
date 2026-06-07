@@ -1,6 +1,8 @@
+import { isDemoFallbackEnabled } from "@/lib/demo-mode";
+
 export function assertProductionDataSource() {
   if (process.env.NODE_ENV !== "production") return;
-  if (process.env.NEXT_PUBLIC_DEMO_FALLBACK !== "false") {
+  if (isDemoFallbackEnabled()) {
     throw new Response(JSON.stringify({ error: "PRODUCTION_DEMO_FALLBACK_ENABLED" }), {
       status: 503,
       headers: { "Content-Type": "application/json" }

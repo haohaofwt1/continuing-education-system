@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { readApiError } from "@/lib/api-client";
 import type { PortalOverview } from "@/components/portal/portal-types";
 
 export function PortalProfileClient() {
@@ -104,15 +105,15 @@ export function PortalProfileClient() {
       const formData = new FormData();
       formData.append("files", file);
       const response = await fetch("/api/upload", { method: "POST", body: formData });
-      const payload = await response.json();
-      if (!response.ok) throw new Error("UPLOAD_FAILED");
-      const uploaded = payload.files?.[0] as { url?: string; thumbnailUrl?: string } | undefined;
+      const payload = await response.clone().json().catch(() => null) as { files?: Array<{ url?: string; thumbnailUrl?: string }> } | null;
+      if (!response.ok) throw new Error(await readApiError(response, "UPLOAD_FAILED"));
+      const uploaded = payload?.files?.[0] as { url?: string; thumbnailUrl?: string } | undefined;
       setAvatarUrl(uploaded?.thumbnailUrl || uploaded?.url || "");
       setNoticeTone("success");
       setNotice("Đã tải ảnh lên. Bấm Lưu thay đổi để cập nhật hồ sơ.");
-    } catch {
+    } catch (error) {
       setNoticeTone("error");
-      setNotice("Chưa upload được ảnh đại diện.");
+      setNotice(error instanceof Error ? error.message : "Chưa upload được ảnh đại diện.");
     } finally {
       setAvatarUploading(false);
     }

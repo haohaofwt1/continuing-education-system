@@ -62,13 +62,30 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }, activeCycle)
       : { includeInCycle: before.includeInCycle };
     const certificateCode = payload.certificateNumber || payload.code || before.certificateCode;
+    const certificateCodeConflict = certificateCode
+      ? await prisma.certificate.findFirst({
+          where: {
+            ...tenantWhere(actor),
+            certificateCode,
+            NOT: { id }
+          }
+        })
+      : null;
     const issuer = payload.issuer === undefined ? before.issuingOrganization : payload.issuer;
     const hours = payload.hours ?? before.creditHours;
-    const fileUrl = payload.fileUrl === undefined ? before.fileUrl : payload.fileUrl;
     const identity = assessEmployeeCertificateIdentity(payload.holderName ?? undefined, payload.holderBirthDate, holder, actor);
     const cyclePrerequisite = assessEmployeeCyclePrerequisite(holder, actor);
     const includeInCycle = cyclePrerequisite.ok ? payload.includeInCycle ?? isIssueDateInEmployeeCycle(issuedDate, holder?.licenseIssuedAt) ?? cycleAssessment.includeInCycle : false;
-    const requiredFieldsMissing = !(payload.title ?? before.title)?.trim() || !issuer?.trim() || !issuedDate || !certificateCode || !Number(hours || 0) || !fileUrl || !identity.ok || !cyclePrerequisite.ok;
+    const requiredFieldsMissing = !(payload.title ?? before.title)?.trim() || !issuer?.trim() || !issuedDate || !certificateCode || !Number(hours || 0) || !identity.ok || !cyclePrerequisite.ok;
+    if (certificateCodeConflict) {
+      return NextResponse.json(
+        {
+          error: "CERTIFICATE_CODE_CONFLICT",
+          detail: `Mã chứng chỉ ${certificateCode} đã tồn tại ở bản ghi khác. Vui lòng đổi sang mã khác.`
+        },
+        { status: 409 }
+      );
+    }
     const reviewStatus = payload.status
       ? (!identity.ok || !cyclePrerequisite.ok ? "MISSING_INFO" : toReviewStatus(payload.status))
       : requiredFieldsMissing
@@ -109,7 +126,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ data: mapCertificate(updated), creditSync, storage: "database" });
   } catch (error) {
     if (error instanceof Response) return error;
-    return NextResponse.json({ error: "UPDATE_CERTIFICATE_FAILED" }, { status: 400 });
+    return NextResponse.json({ error: "UPDATE_CERTIFICATE_FAILED", detail: error instanceof Error ? error.message : undefined }, { status: 400 });
   }
 }
 

@@ -25,7 +25,7 @@ export function LoginForm() {
         });
         setLoading(false);
         if (result?.error) {
-          setError("Không đăng nhập được. Hãy bật database test rồi thử lại, hoặc kiểm tra email/mật khẩu.");
+          setError("Không đăng nhập được. Hãy kiểm tra email, mật khẩu và database production.");
           return;
         }
         const session = await getSession();
@@ -33,8 +33,8 @@ export function LoginForm() {
         window.location.href = employeeMode ? "/portal" : (result?.url ?? "/dashboard");
       }}
     >
-      <Input name="email" type="email" defaultValue="admin@example.com" />
-      <Input name="password" type="password" defaultValue="ChangeMe123!" />
+      <Input name="email" type="email" defaultValue="admin@example.com" placeholder="admin@example.com" />
+      <Input name="password" type="password" placeholder="Mật khẩu quản trị" />
       {error ? <div className="rounded-xl bg-red-50 p-3 text-sm font-medium text-red-700">{error}</div> : null}
       <Button className="w-full" type="submit" disabled={loading}>{loading ? "Đang đăng nhập..." : "Đăng nhập"}</Button>
     </form>

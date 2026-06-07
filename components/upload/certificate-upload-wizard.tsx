@@ -6,6 +6,7 @@ import { Camera, CheckCircle2, FileUp, Loader2, RotateCcw, RotateCw, ScanText } 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { readApiError } from "@/lib/api-client";
 import { getSettings, type DemoCertificate } from "@/lib/demo-store";
 import { certificateCycleAssessment, cycleEndDate, cycleStartDate } from "@/lib/training-rules";
 
@@ -99,16 +100,25 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
       let storedFile: UploadedFile | null = null;
       try {
         if (first) {
-          if (first.type !== "application/pdf") {
-            setPreview(await fileToDataUrl(first));
+          try {
+            if (first.type !== "application/pdf") {
+              setPreview(await fileToDataUrl(first));
+            }
+            const formData = new FormData();
+            formData.append("files", first);
+            const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
+            const uploadData = await uploadResponse.clone().json().catch(() => null) as { files?: UploadedFile[] } | null;
+            if (!uploadResponse.ok) {
+              throw new Error(await readApiError(uploadResponse, "UPLOAD_FAILED"));
+            }
+            storedFile = uploadData?.files?.[0] ?? null;
+            setUploadedFile(storedFile);
+            if (storedFile?.thumbnailUrl) setPreview(storedFile.thumbnailUrl);
+          } catch (error) {
+            const uploadError = error instanceof Error ? error.message : "UPLOAD_FAILED";
+            setSubmitError(`Tải tệp thất bại: ${uploadError}`);
+            setRawText(`Upload không thành công: ${uploadError}`);
           }
-          const formData = new FormData();
-          formData.append("files", first);
-          const uploadResponse = await fetch("/api/upload", { method: "POST", body: formData });
-          const uploadData = await uploadResponse.json();
-          storedFile = uploadResponse.ok ? uploadData.files?.[0] ?? null : null;
-          setUploadedFile(storedFile);
-          if (storedFile?.thumbnailUrl) setPreview(storedFile.thumbnailUrl);
         }
 
         const autoRotation = first?.name?.toLowerCase().includes("dthuong") ? 90 : 0;
@@ -119,11 +129,15 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileName: first?.name ?? "", fileUrl: storedFile?.url ?? null, rotation: autoRotation })
         });
-        const data = await ocrResponse.json();
-        if (data.extracted) setExtracted(data.extracted);
-        if (data.rawText) setRawText(data.rawText);
-      } catch {
-        setRawText("OCR/upload mock không phản hồi, dùng dữ liệu mẫu.");
+        const data = await ocrResponse.clone().json().catch(() => null) as { extracted?: typeof fallbackExtracted; rawText?: string } | null;
+        if (!ocrResponse.ok) {
+          throw new Error(await readApiError(ocrResponse, "OCR_FAILED"));
+        }
+        if (data?.extracted) setExtracted(data.extracted);
+        if (data?.rawText) setRawText(data.rawText);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "OCR_FAILED";
+        setRawText(`OCR/upload không thành công: ${message}`);
       } finally {
         setProcessing(false);
         setStep(3);
@@ -255,8 +269,8 @@ export function CertificateUploadWizard({ onCreate }: { onCreate?: (certificate:
                     setRotation(0);
                     setUploadedFile(null);
                     setStep(1);
-                  } catch {
-                    setSubmitError("Chưa lưu được chứng chỉ. Kiểm tra người được cấp, mã chứng chỉ hoặc kết nối database rồi thử lại.");
+                  } catch (error) {
+                    setSubmitError(error instanceof Error ? error.message : "Chưa lưu được chứng chỉ. Kiểm tra người được cấp, mã chứng chỉ hoặc kết nối database rồi thử lại.");
                   } finally {
                     setSaving(false);
                   }
