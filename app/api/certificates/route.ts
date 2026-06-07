@@ -167,21 +167,44 @@ async function upsertCertificate(payload: z.infer<typeof certificateSchema>, act
     });
   }
 
-  if (certificateCode && !duplicate && actor.tenantId) {
-    return prisma.certificate.upsert({
+  if (certificateCode && actor.tenantId) {
+    const existing = await prisma.certificate.findFirst({
       where: {
-        tenantId_certificateCode: {
-          tenantId: actor.tenantId,
-          certificateCode
-        }
-      },
-      update: data,
-      create: data,
-      include
+        ...tenantWhere(actor),
+        certificateCode,
+        deletedAt: null
+      }
     });
+    if (existing) {
+      return prisma.certificate.update({
+        where: { id: existing.id },
+        data,
+        include
+      });
+    }
   }
 
-  return prisma.certificate.create({ data, include });
+  try {
+    return await prisma.certificate.create({ data, include });
+  } catch (error) {
+    if (isPrismaUniqueCertificateConflict(error) && actor.tenantId && certificateCode) {
+      const conflicting = await prisma.certificate.findFirst({
+        where: {
+          ...tenantWhere(actor),
+          certificateCode,
+          deletedAt: null
+        }
+      });
+      if (conflicting) {
+        return prisma.certificate.update({
+          where: { id: conflicting.id },
+          data,
+          include
+        });
+      }
+    }
+    throw error;
+  }
 }
 
 async function detectDuplicateCertificate(certificateCode: string | undefined, payload: z.infer<typeof certificateSchema>, actor: Awaited<ReturnType<typeof requirePermission>>) {
@@ -283,6 +306,19 @@ async function findOrCreateCertificateType(name?: string | null) {
   const value = name?.trim();
   if (!value) return null;
   return prisma.certificateType.upsert({ where: { name: value }, update: {}, create: { name: value } });
+}
+
+function isPrismaUniqueCertificateConflict(error: unknown) {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2002" &&
+      "meta" in error &&
+      Array.isArray((error as { meta?: { target?: unknown } }).meta?.target) &&
+      String((error as { meta?: { target?: unknown } }).meta?.target).includes("tenantId") &&
+      String((error as { meta?: { target?: unknown } }).meta?.target).includes("certificateCode")
+  );
 }
 
 function parseDate(value?: string | null) {
